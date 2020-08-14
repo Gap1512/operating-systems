@@ -1,0 +1,1121 @@
+#+OPTIONS: ':nil *:t -:t ::t <:t H:3 \n:nil ^:t arch:headline
+#+OPTIONS: author:t broken-links:nil c:nil creator:nil
+#+OPTIONS: d:(not "LOGBOOK") date:t e:t email:nil f:t inline:t num:t
+#+OPTIONS: p:nil pri:nil prop:nil stat:t tags:t tasks:t tex:t
+#+OPTIONS: timestamp:t title:t toc:nil todo:t |:t
+#+TITLE: Notes On [[http://pages.cs.wisc.edu/~remzi/OSTEP/#:~:text=The%20book%20is%20centered%20around,virtualization,%20concurrency,%20and%20persistence][Operating Systems: Three Easy Pieces]]
+#+AUTHOR: Gustavo Alves Pacheco
+#+EMAIL: gap1512@gmail.com
+#+LANGUAGE: pt_BR
+#+SELECT_TAGS: export
+#+EXCLUDE_TAGS: noexport
+#+CREATOR: Emacs 26.2 (Org mode 9.1.9)
+# -*- org-export-babel-evaluate: nil -*-
+
+* [[http://pages.cs.wisc.edu/~remzi/OSTEP/intro.pdf][Introdução]]
+
+Um programa executa instruções. Milhões de vezes por segundo o processador busca (*fetch*) uma instrução da memória,
+a decodifica (*decode*) e a executa (*execute*). E assim ocorre até que o programa seja finalizado.
+O Sistema Operacional (OS) facilita a execução de programas, permitindo o compartilhamento de memória, a 
+interação com dispositivos, entre outros. 
+
+Para isso, o OS utiliza a *virtualização*, uma técnica que transforma um recurso físico do computador
+em um virtual. Logo, OSs são chamados ocasionalmente de *Máquinas Virtuais*. Para que o usuário possa ter acesso
+à esses recursos, o OS também fornece APIs para comunicação. São as *system calls*, que o OS exporta. Esse conjunto 
+de funções é chamado de *standard library*.
+
+O OS também é conhecido por *resource manager*, visto que a virtualização acarreta o compartilhamento de recursos,
+cabe ao sistema operacional fazer a organização dos mesmos.
+
+** Virtualização da CPU
+
+O código abaixo imprime na tela a string passada pelo usuário a cada segundo.
+
+#+BEGIN_SRC C :includes <stdio.h> <stdlib.h> <sys/time.h> <assert.h> "common.h" :tangle "code/cpu.c"
+  int main(int argc, char *argv[]){
+    if(argc != 2){
+      fprintf(stderr, "usage: cpu <string>\n");
+      exit(1);
+    }
+    while(1){
+      Spin(1);
+      printf("%s\n", argv[1]);
+    }
+    return 0;
+  }
+#+END_SRC
+
+Para isso, chama a função ~Spin~, definida na biblioteca ~"common.h"~, definida abaixo.
+
+#+BEGIN_SRC C :main "no" :tangle "code/common.h"
+  #ifndef __common_h__
+  #define __common_h__
+
+  #include <sys/time.h>
+  #include <sys/stat.h>
+  #include <assert.h>
+
+  double GetTime(){
+    struct timeval t;
+    int rc = gettimeofday(&t, NULL);
+    assert(rc == 0);
+    return (double) t.tv_sec + (double) t.tv_usec/1e6;
+  }
+
+  void Spin(int howlong) {
+    double t = GetTime();
+    while((GetTime() - t) < (double) howlong);
+  }
+
+  #endif
+#+END_SRC
+
+Ao executar o programa, o seguinte resultado é obtido:
+
+#+BEGIN_SRC shell :exports both
+  gcc -o cpu cpu.c
+  ./cpu "A"
+#+END_SRC
+
+#+RESULTS:
+: A
+: A
+: A
+: A
+: A
+: A
+: ^C
+
+Para finalizar a execução, é necessário pressionar ~C-c~. A execução do programa é simples e direta. A seguir, 
+são invocadas quatro instâncias do programa. O resultado mostra que os processos, de certa forma, executaram 
+simultaneamente.
+
+#+BEGIN_SRC shell  :exports both
+  ./cpu "A" & ./cpu "B" & ./cpu "C" & ./cpu "D"
+#+END_SRC
+
+#+RESULTS:
+: [1] 22
+: [2] 23
+: [3] 24
+: [4] 25
+: A
+: B
+: C
+: D
+: A
+: B
+: C
+: D
+: A
+: B
+: C
+: D
+: ...
+
+Entretanto, este comportamento é uma ilusão orquestrada pelo Sistema Operacional, 
+em conjunto com o hardware da máquina, que consegue transformar uma única CPU em várias CPUs virtuais. Este processo é
+chamado de *virtualização da CPU*.
+
+** Virtualização da Memória
+
+A memória física é um array de bytes. Para que a memória seja lida, deve-se especificar o endereço para recuperação
+dos dados armazenados. Para escrita, os dados a serem gravados também devem ser fornecidos. A memória é acessada diversas
+vezes quando um programa é executado. Não só os dados utilizados pelo programa são armazenados em memória, como
+também as instruções do próprio programa. A seguir, está definido um programa que faz acessos à memória.
+
+#+BEGIN_SRC C :includes <unistd.h> <stdio.h> <stdlib.h> "common.h" :tangle "code/mem.c"
+  int main(){
+    int *p = malloc(sizeof(int));
+    assert(p != NULL);
+
+    printf("(%d) address pointed to by p: %p\n", getpid(), p);
+
+    *p = 0;
+    while (1){
+      Spin(1);
+      ,*p = *p + 1;
+      printf("(%d) p: %d\n", getpid(), *p);
+    }
+    return 0;
+  }
+#+END_SRC
+
+Executando-o:
+
+#+BEGIN_SRC shell :exports both
+  gcc -o mem mem.c
+  ./mem
+#+END_SRC
+
+#+RESULTS:
+: (104) address pointed to by p: 0x80052a0
+: (104) p: 1
+: (104) p: 2
+: (104) p: 3
+: (104) p: 4
+: ^C
+
+Este programa realiza uma alocação de memória, depois imprime o endereço da memória alocada, em seguida coloca 0 
+como conteúdo daquele endereço e por fim entra em um loop que incrementa esse valor a cada segundo. Nas impressões,
+o identificador de processo (PID) do programa em execução também é informado. Quando mais de uma instância desse 
+programa executa, o seguinte resultado é obtido.
+
+#+BEGIN_SRC shell :exports both
+  ./mem & ./mem &
+#+END_SRC
+
+#+RESULTS:
+: [2] 105
+: [3] 106
+: (105) address pointed to by p: 0x80052a0
+: (106) address pointed to by p: 0x80052a0
+: (105) p: 1
+: (106) p: 1
+: (105) p: 2
+: (106) p: 2
+: (105) p: 3
+: (106) p: 3
+: (105) p: 4
+: (106) p: 4
+: (105) p: 5
+: (106) p: 5
+: ...
+
+Observa-se que ambos os programas alocaram memória do mesmo endereço, entretanto, as alterações que cada um faz
+é independente. Isto se deve à virtualização da memória, na qual cada processo acessa seu próprio espaço virtual
+de endereços (virtual address space, ou address space, somente), cabendo ao SO mapear essa memória particular na física.
+
+** Simultaneidade
+
+Termo que se refere a uma gama de problemas que surgem quando tarefas são executadas simultaneamente.
+Estes problemas não se limitam ao SO, como também aparecem em programas modernos *multi-threaded*, como o seguinte:
+
+#+BEGIN_SRC C :main "no" :includes <stdio.h> <stdlib.h> "common.h" "common_threads.h" :tangle "code/thread.c"
+  volatile int counter = 0;
+  int loops;
+
+  void *worker(void *arg){
+    int i;
+    for(i = 0; i < loops; i++){
+      counter++;
+    }
+    return NULL;
+  }
+
+  int main(int argc, char *argv[]){
+
+    if(argc != 2){
+      fprintf(stderr, "usage: threads <value>\n");
+      exit(1);
+    }
+
+    loops = atoi(argv[1]);
+
+    pthread_t p1, p2;
+    printf("Initial value : %d\n", counter);
+
+    Pthread_create(&p1, NULL, worker, NULL);
+    Pthread_create(&p2, NULL, worker, NULL);
+    Pthread_join(p1, NULL);
+    Pthread_join(p2, NULL);
+
+    printf("Final value : %d\n", counter);
+  
+    return 0;
+  }
+#+END_SRC
+
+Tal programa utiliza a biblioteca ~"common_threads.h"~, definida abaixo:
+
+#+BEGIN_SRC C :main "no" :tangle "code/common_threads.h"
+  #ifndef __common_threads_h__
+  #define __common_threads_h__
+
+  #include <pthread.h>
+  #include <assert.h>
+  #include <sched.h>
+
+  #ifdef __linux__
+  #include <semaphore.h>
+  #endif
+
+  #define Pthread_create(thread, attr, start_routine, arg) assert(pthread_create(thread, attr, start_routine, arg) == 0);
+  #define Pthread_join(thread, value_ptr) assert(pthread_join(thread, value_ptr) == 0);
+
+  #define Pthread_mutex_lock(m)                            assert(pthread_mutex_lock(m) == 0);
+  #define Pthread_mutex_unlock(m)                          assert(pthread_mutex_unlock(m) == 0);
+  #define Pthread_cond_signal(cond)                        assert(pthread_cond_signal(cond) == 0);
+  #define Pthread_cond_wait(cond, mutex)                   assert(pthread_cond_wait(cond, mutex) == 0);
+
+  #define Mutex_init(m)                                    assert(pthread_mutex_init(m, NULL) == 0);
+  #define Mutex_lock(m)                                    assert(pthread_mutex_lock(m) == 0);
+  #define Mutex_unlock(m)                                  assert(pthread_mutex_unlock(m) == 0);
+  #define Cond_init(cond)                                  assert(pthread_cond_init(cond, NULL) == 0);
+  #define Cond_signal(cond)                                assert(pthread_cond_signal(cond) == 0);
+  #define Cond_wait(cond, mutex)                           assert(pthread_cond_wait(cond, mutex) == 0);
+
+  #ifdef __linux__
+  #define Sem_init(sem, value)                             assert(sem_init(sem, 0, value) == 0);
+  #define Sem_wait(sem)                                    assert(sem_wait(sem) == 0);
+  #define Sem_post(sem)                                    assert(sem_post(sem) == 0);
+  #endif
+
+  #endif
+#+END_SRC
+
+Este programa cria duas *threads* usando o ~Pthread_create()~. Um thread pode ser imaginada como uma função
+que roda no mesmo espaço de memória de outras funções, com mais de uma delas sendo executada ao mesmo tempo.
+No exemplo acima, cada thread começa executando a rotina ~worker()~, na qual um contador é incrementado 
+dentro de um loop. Executando o código para ~loops = 1000~, temos:
+
+#+BEGIN_SRC shell :exports both
+  gcc -o thread thread.c -Wall -pthread
+  ./thread 1000
+#+END_SRC
+
+#+RESULTS:
+| Initial | value | : |    0 |
+| Final   | value | : | 2000 |
+
+Como esperado, cada thread incrementa o contador 1000 vezes, resultando em um valor final de 2000.
+
+#+BEGIN_SRC shell :exports both
+  ./thread 100000
+#+END_SRC
+
+#+RESULTS:
+| Initial | value | : |      0 |
+| Final   | value | : | 124234 |
+
+#+BEGIN_SRC shell :exports both
+  ./thread 100000
+#+END_SRC
+
+#+RESULTS:
+| Initial | value | : |      0 |
+| Final   | value | : | 123549 |
+
+Para valores maiores de ~loops~, algo inesperado acontece, como observado acima. Não só o resultado apresentado
+foi incorreto, como também inconsistente, como mostra a segunda execução com ~loops = 100000~. Este comportamento
+ocorre por causa da natureza de execução do código. A instrução que incrementa o contador compartilhado se 
+transforma em três comandos: um para carregar o valor do contador da memória para o registrador, outro para 
+incrementá-lo e um último para registrá-lo novamente na memória. O erro aparece pois estas instruções não são 
+executadas *atomicamente* (todas de uma vez).
+
+** Persistência
+
+Memórias DRAM armazenam valores de forma volátil, sendo sucetíveis a perda em caso de falha do sistema ou uma
+reinicialização. Portanto, memórias persistentes são fundamentais para armazenamento de longo prazo. O OS fornece
+um *file system*, responsável por armazenar os arquivos (*files*), que o usuário cria.
+O programa a seguir cria um arquivo que contém a string "hello world".
+
+#+BEGIN_SRC C :includes <stdio.h> <unistd.h> <assert.h> <fcntl.h> <sys/types.h> :tangle "code/io.c"
+  int fd = open("/tmp/file", O_WRONLY|O_CREAT|O_TRUNC, S_IRWXU);
+  assert(fd > -1);
+
+  int rc = write(fd, "hello world\n", 13);
+  assert(rc == 13);
+
+  close(fd);
+
+  return 0;
+#+END_SRC
+
+#+BEGIN_SRC shell :exports both
+  gcc -o io io.c -Wall
+  ./io
+  echo "$(cat /tmp/file)"
+#+END_SRC
+
+#+RESULTS:
+: hello world
+
+Para isto, o programa abre o arquivo e o cria (~open()~), escreve dados (~write()~) e por fim o fecha
+(~close()~). Esses *system calls* são direcionados ao *file system*. O OS deve encontrar no disco onde este
+arquivo residirá, alem de manter registros sobre isto ao longo da execução, enviando diversos comandos de I/O
+para o dispositivo de armazenamento. Desta forma, o sistema operacional fornece uma forma simples e padronizada
+de comunicação com tais dispositivos. Por isso ele é chamado (as vezes) de *standard library*.
+
+** Metas de Design
+
+Assim, um OS é encarregado de transformar recursos físicos, como CPU, memória, disco, e os virtualizar. 
+Além disso, cuida de problemas relacionados à simultaneidade e garante a persistência dos dados. Tal sistema
+é desenvolvido tendo em mente algumas metas, que ajudam no foco do design. Uma das principais é construir
+abstrações, tornando o sistema fácil de usar. Outra meta é a de garantir alta performance (*minimize the overheads* 
+do OS). Não é possível alcançar a perfeição em termos de performance, logo otimizações em tempo (menos instruções)
+e espaço (na memória ou no disco) devem ser conciliadas. Proteção também deve ser uma das metas, sendo fundamental
+que o OS garanta a *isolation* entre os programas (e também o próprio OS). Confiabilidade também deve ser levada
+em conta, já que uma falha no OS corresponde à uma falha em todos os programas em execução. Dependo da aplicação, um
+OS pode ter diferentes metas, como eficiência energética, segurança, mobilidade.
+
+* [[http://pages.cs.wisc.edu/~remzi/OSTEP/cpu-intro.pdf][Processos]]
+
+O *processo* é uma das abstrações mais fundamentais fornecidas pelo OS. Informalmente, um processo é um
+programa em execução. Ao virtualizar a CPU, o OS cria a ilusão de que múltiplas CPUs estão disponíveis para
+os programas, sendo possível executar vários deles simultaneamente. Para isto, o OS divide o tempo de uso
+da CPU (*time sharing*) entre os processos que a requerem. Tal ilusão vem a custo de performance, já que o recurso
+está sendo compartilhado. 
+A implementação da virtualização da CPU é composta de mecanismos (*mechanisms*), que são métodos/protocolos em
+baixo nível que implementa uma parte da funcionalidade, e políticas (*policies*), algoritmos para alguma
+tomada de decisão por parte do OS (qual processo deve rodar em seguida, por exemplo).
+
+** A Abstração: Um Processo
+
+Um processo é um programa em execução. O mesmo pode ser resumido de acordo com as diferentes peças do sistema
+que ele acessa ou afeta durante execução. O *machine state* de um processo corresponde ao que um programa consegue
+ler ou atualizar. Durante a execução de um programa, algumas partes do computador são essenciais. São eles:
+Memória (instruções armazenadas em memória, além do espaço de memória que o processo tem acesso), registradores e 
+dispositivos de armazenamento persistentes.
+
+** API de Processo
+
+A API de um processo deve possibilitar: criação, destruição, espera, controles diversos, controle de estado, 
+
+** Criação do Processo: Um Pouco Mais Detalhado
+
+Inicialmente o código do programa e os dados estáticos necessários (exemplo variáveis inicializadas) são carregados
+do disco para o address space do processo, na memória.
+Em seguida, memória é alocada para o *run-time stack* (*stack*), e os valores de argumentos do programa são
+inicializados na pilha.
+O OS também pode alocar espaço para o *heap* (memória alocada dinamicamente pelo usuário) e realizar tarefas
+diversas envolvendo configuração de I/O. Então, o OS deve inicializar o programa em determinado ponto (~main()~)
+e passar o controle para o processo. 
+
+** Estados de Processo
+
+Um processo pode estar em um de três estados: 
+- Em execução (Running): O processo está sendo executado, o processador está executando as instruções do mesmo.
+- Pronto (Ready): O processo está pronto para ser executado e esperando que o OS o selecione para execução.
+- Bloqueado (Blocked): O processo está com alguma pendência, que impede sua execução até a finalização de um evento (exemplo: ao requisitar I/O).
+
+** Estrutura de Dados
+
+Assim como qualquer programa, o OS também possui algumas estruturas de dados chave para rastrear as informações 
+relevantes. Por exemplo, uma lista de processos, que indica quais deles estão prontos para execução, quais estão
+bloqueados, além de armazenar os registradores de contexto (*register context*) de um processo parado, para
+que possam ser restaurados para os registradores físicos, quando o mesmo entrar em execução. Algumas vezes, a 
+estrutura que armazena as informações de um processo é chamada de Bloco de Controle de Processo (*Process Control
+Block - PCB*), também chamado de *process descriptor*.
+
+** Homework
+
+*** Questão 1
+
+100%, visto que todas as instruções são para a CPU.
+
+#+BEGIN_SRC shell :exports both
+  ./homework/cpu-intro/process-run.py -l 5:100,5:100 -c -p
+#+END_SRC
+
+#+RESULTS:
+|   Time | PID:    | 0       | PID: | 1         | CPU | IOs |
+|      1 | RUN:cpu | READY   |    1 |           |     |     |
+|      2 | RUN:cpu | READY   |    1 |           |     |     |
+|      3 | RUN:cpu | READY   |    1 |           |     |     |
+|      4 | RUN:cpu | READY   |    1 |           |     |     |
+|      5 | RUN:cpu | READY   |    1 |           |     |     |
+|      6 | DONE    | RUN:cpu |    1 |           |     |     |
+|      7 | DONE    | RUN:cpu |    1 |           |     |     |
+|      8 | DONE    | RUN:cpu |    1 |           |     |     |
+|      9 | DONE    | RUN:cpu |    1 |           |     |     |
+|     10 | DONE    | RUN:cpu |    1 |           |     |     |
+|        |         |         |      |           |     |     |
+| Stats: | Total   | Time    |   10 |           |     |     |
+| Stats: | CPU     | Busy    |   10 | (100.00%) |     |     |
+| Stats: | IO      | Busy    |    0 | (0.00%)   |     |     |
+|        |         |         |      |           |     |     |
+
+*** Questão 2
+
+#+BEGIN_SRC shell :exports both
+  ./homework/cpu-intro/process-run.py -l 4:100,1:0 -c -p
+#+END_SRC
+
+#+RESULTS:
+|   Time | PID:    | 0       | PID: | 1        | CPU | IOs |
+|      1 | RUN:cpu | READY   |    1 |          |     |     |
+|      2 | RUN:cpu | READY   |    1 |          |     |     |
+|      3 | RUN:cpu | READY   |    1 |          |     |     |
+|      4 | RUN:cpu | READY   |    1 |          |     |     |
+|      5 | DONE    | RUN:io  |    1 |          |     |     |
+|      6 | DONE    | WAITING |    1 |          |     |     |
+|      7 | DONE    | WAITING |    1 |          |     |     |
+|      8 | DONE    | WAITING |    1 |          |     |     |
+|      9 | DONE    | WAITING |    1 |          |     |     |
+|    10* | DONE    | DONE    |      |          |     |     |
+|        |         |         |      |          |     |     |
+| Stats: | Total   | Time    |   10 |          |     |     |
+| Stats: | CPU     | Busy    |    5 | (50.00%) |     |     |
+| Stats: | IO      | Busy    |    4 | (40.00%) |     |     |
+|        |         |         |      |          |     |     |
+
+*** Questão 3
+
+#+BEGIN_SRC shell :exports both
+  ./homework/cpu-intro/process-run.py -l 1:0,4:100 -c -p
+#+END_SRC
+
+#+RESULTS:
+|   Time | PID:    | 0       | PID: |        1 | CPU | IOs |
+|      1 | RUN:io  | READY   |    1 |          |     |     |
+|      2 | WAITING | RUN:cpu |    1 |        1 |     |     |
+|      3 | WAITING | RUN:cpu |    1 |        1 |     |     |
+|      4 | WAITING | RUN:cpu |    1 |        1 |     |     |
+|      5 | WAITING | RUN:cpu |    1 |        1 |     |     |
+|     6* | DONE    | DONE    |      |          |     |     |
+|        |         |         |      |          |     |     |
+| Stats: | Total   | Time    |    6 |          |     |     |
+| Stats: | CPU     | Busy    |    5 | (83.33%) |     |     |
+| Stats: | IO      | Busy    |    4 | (66.67%) |     |     |
+|        |         |         |      |          |     |     |
+
+*** Questão 4
+
+#+BEGIN_SRC shell :exports both
+  ./homework/cpu-intro/process-run.py -l 1:0,4:100 -c -p -S SWITCH_ON_END
+#+END_SRC
+
+#+RESULTS:
+|   Time | PID:    | 0       | PID: | 1        | CPU | IOs |
+|      1 | RUN:io  | READY   |    1 |          |     |     |
+|      2 | WAITING | READY   |    1 |          |     |     |
+|      3 | WAITING | READY   |    1 |          |     |     |
+|      4 | WAITING | READY   |    1 |          |     |     |
+|      5 | WAITING | READY   |    1 |          |     |     |
+|     6* | DONE    | RUN:cpu |    1 |          |     |     |
+|      7 | DONE    | RUN:cpu |    1 |          |     |     |
+|      8 | DONE    | RUN:cpu |    1 |          |     |     |
+|      9 | DONE    | RUN:cpu |    1 |          |     |     |
+|        |         |         |      |          |     |     |
+| Stats: | Total   | Time    |    9 |          |     |     |
+| Stats: | CPU     | Busy    |    5 | (55.56%) |     |     |
+| Stats: | IO      | Busy    |    4 | (44.44%) |     |     |
+|        |         |         |      |          |     |     |
+
+*** Questão 5
+
+#+BEGIN_SRC shell :exports both
+  ./homework/cpu-intro/process-run.py -l 1:0,4:100 -c -p -S SWITCH_ON_IO
+#+END_SRC
+
+#+RESULTS:
+|   Time | PID:    | 0       | PID: |        1 | CPU | IOs |
+|      1 | RUN:io  | READY   |    1 |          |     |     |
+|      2 | WAITING | RUN:cpu |    1 |        1 |     |     |
+|      3 | WAITING | RUN:cpu |    1 |        1 |     |     |
+|      4 | WAITING | RUN:cpu |    1 |        1 |     |     |
+|      5 | WAITING | RUN:cpu |    1 |        1 |     |     |
+|     6* | DONE    | DONE    |      |          |     |     |
+|        |         |         |      |          |     |     |
+| Stats: | Total   | Time    |    6 |          |     |     |
+| Stats: | CPU     | Busy    |    5 | (83.33%) |     |     |
+| Stats: | IO      | Busy    |    4 | (66.67%) |     |     |
+|        |         |         |      |          |     |     |
+
+*** Questão 6
+
+#+BEGIN_SRC shell :exports both
+  ./homework/cpu-intro/process-run.py -l 3:0,5:100,5:100,5:100 -c -p -S SWITCH_ON_IO -I IO_RUN_LATER
+#+END_SRC
+
+#+RESULTS:
+|   Time | PID:    | 0       | PID:    | 1        | PID: | 2 | PID: | 3 | CPU | IOs |
+|      1 | RUN:io  | READY   | READY   | READY    |    1 |   |      |   |     |     |
+|      2 | WAITING | RUN:cpu | READY   | READY    |    1 | 1 |      |   |     |     |
+|      3 | WAITING | RUN:cpu | READY   | READY    |    1 | 1 |      |   |     |     |
+|      4 | WAITING | RUN:cpu | READY   | READY    |    1 | 1 |      |   |     |     |
+|      5 | WAITING | RUN:cpu | READY   | READY    |    1 | 1 |      |   |     |     |
+|     6* | READY   | RUN:cpu | READY   | READY    |    1 |   |      |   |     |     |
+|      7 | READY   | DONE    | RUN:cpu | READY    |    1 |   |      |   |     |     |
+|      8 | READY   | DONE    | RUN:cpu | READY    |    1 |   |      |   |     |     |
+|      9 | READY   | DONE    | RUN:cpu | READY    |    1 |   |      |   |     |     |
+|     10 | READY   | DONE    | RUN:cpu | READY    |    1 |   |      |   |     |     |
+|     11 | READY   | DONE    | RUN:cpu | READY    |    1 |   |      |   |     |     |
+|     12 | READY   | DONE    | DONE    | RUN:cpu  |    1 |   |      |   |     |     |
+|     13 | READY   | DONE    | DONE    | RUN:cpu  |    1 |   |      |   |     |     |
+|     14 | READY   | DONE    | DONE    | RUN:cpu  |    1 |   |      |   |     |     |
+|     15 | READY   | DONE    | DONE    | RUN:cpu  |    1 |   |      |   |     |     |
+|     16 | READY   | DONE    | DONE    | RUN:cpu  |    1 |   |      |   |     |     |
+|     17 | RUN:io  | DONE    | DONE    | DONE     |    1 |   |      |   |     |     |
+|     18 | WAITING | DONE    | DONE    | DONE     |    1 |   |      |   |     |     |
+|     19 | WAITING | DONE    | DONE    | DONE     |    1 |   |      |   |     |     |
+|     20 | WAITING | DONE    | DONE    | DONE     |    1 |   |      |   |     |     |
+|     21 | WAITING | DONE    | DONE    | DONE     |    1 |   |      |   |     |     |
+|    22* | RUN:io  | DONE    | DONE    | DONE     |    1 |   |      |   |     |     |
+|     23 | WAITING | DONE    | DONE    | DONE     |    1 |   |      |   |     |     |
+|     24 | WAITING | DONE    | DONE    | DONE     |    1 |   |      |   |     |     |
+|     25 | WAITING | DONE    | DONE    | DONE     |    1 |   |      |   |     |     |
+|     26 | WAITING | DONE    | DONE    | DONE     |    1 |   |      |   |     |     |
+|    27* | DONE    | DONE    | DONE    | DONE     |      |   |      |   |     |     |
+|        |         |         |         |          |      |   |      |   |     |     |
+| Stats: | Total   | Time    | 27      |          |      |   |      |   |     |     |
+| Stats: | CPU     | Busy    | 18      | (66.67%) |      |   |      |   |     |     |
+| Stats: | IO      | Busy    | 12      | (44.44%) |      |   |      |   |     |     |
+|        |         |         |         |          |      |   |      |   |     |     |
+
+*** Questão 7
+
+#+BEGIN_SRC shell :exports both
+  ./homework/cpu-intro/process-run.py -l 3:0,5:100,5:100,5:100 -c -p -S SWITCH_ON_IO -I IO_RUN_IMMEDIATE
+#+END_SRC
+
+#+RESULTS:
+|   Time | PID:    | 0       | PID:    | 1         | PID: | 2 | PID: | 3 | CPU | IOs |
+|      1 | RUN:io  | READY   | READY   | READY     |    1 |   |      |   |     |     |
+|      2 | WAITING | RUN:cpu | READY   | READY     |    1 | 1 |      |   |     |     |
+|      3 | WAITING | RUN:cpu | READY   | READY     |    1 | 1 |      |   |     |     |
+|      4 | WAITING | RUN:cpu | READY   | READY     |    1 | 1 |      |   |     |     |
+|      5 | WAITING | RUN:cpu | READY   | READY     |    1 | 1 |      |   |     |     |
+|     6* | RUN:io  | READY   | READY   | READY     |    1 |   |      |   |     |     |
+|      7 | WAITING | RUN:cpu | READY   | READY     |    1 | 1 |      |   |     |     |
+|      8 | WAITING | DONE    | RUN:cpu | READY     |    1 | 1 |      |   |     |     |
+|      9 | WAITING | DONE    | RUN:cpu | READY     |    1 | 1 |      |   |     |     |
+|     10 | WAITING | DONE    | RUN:cpu | READY     |    1 | 1 |      |   |     |     |
+|    11* | RUN:io  | DONE    | READY   | READY     |    1 |   |      |   |     |     |
+|     12 | WAITING | DONE    | RUN:cpu | READY     |    1 | 1 |      |   |     |     |
+|     13 | WAITING | DONE    | RUN:cpu | READY     |    1 | 1 |      |   |     |     |
+|     14 | WAITING | DONE    | DONE    | RUN:cpu   |    1 | 1 |      |   |     |     |
+|     15 | WAITING | DONE    | DONE    | RUN:cpu   |    1 | 1 |      |   |     |     |
+|    16* | DONE    | DONE    | DONE    | RUN:cpu   |    1 |   |      |   |     |     |
+|     17 | DONE    | DONE    | DONE    | RUN:cpu   |    1 |   |      |   |     |     |
+|     18 | DONE    | DONE    | DONE    | RUN:cpu   |    1 |   |      |   |     |     |
+|        |         |         |         |           |      |   |      |   |     |     |
+| Stats: | Total   | Time    | 18      |           |      |   |      |   |     |     |
+| Stats: | CPU     | Busy    | 18      | (100.00%) |      |   |      |   |     |     |
+| Stats: | IO      | Busy    | 12      | (66.67%)  |      |   |      |   |     |     |
+|        |         |         |         |           |      |   |      |   |     |     |
+
+*** Questão 8
+
+#+BEGIN_SRC shell :exports both
+  ./homework/cpu-intro/process-run.py -s 1 -l 3:50,3:50 -c -p
+#+END_SRC
+
+#+RESULTS:
+|   Time | PID:    | 0       | PID: |        1 | CPU | IOs |
+|      1 | RUN:cpu | READY   |    1 |          |     |     |
+|      2 | RUN:io  | READY   |    1 |          |     |     |
+|      3 | WAITING | RUN:cpu |    1 |        1 |     |     |
+|      4 | WAITING | RUN:cpu |    1 |        1 |     |     |
+|      5 | WAITING | RUN:cpu |    1 |        1 |     |     |
+|      6 | WAITING | DONE    |    1 |          |     |     |
+|     7* | RUN:io  | DONE    |    1 |          |     |     |
+|      8 | WAITING | DONE    |    1 |          |     |     |
+|      9 | WAITING | DONE    |    1 |          |     |     |
+|     10 | WAITING | DONE    |    1 |          |     |     |
+|     11 | WAITING | DONE    |    1 |          |     |     |
+|    12* | DONE    | DONE    |      |          |     |     |
+|        |         |         |      |          |     |     |
+| Stats: | Total   | Time    |   12 |          |     |     |
+| Stats: | CPU     | Busy    |    6 | (50.00%) |     |     |
+| Stats: | IO      | Busy    |    8 | (66.67%) |     |     |
+|        |         |         |      |          |     |     |
+
+#+BEGIN_SRC shell :exports both
+  ./homework/cpu-intro/process-run.py -s 1 -l 3:50,3:50 -c -p -I IO_RUN_IMMEDIATE -S SWITCH_ON_IO
+#+END_SRC
+
+#+RESULTS:
+|   Time | PID:    | 0       | PID: |        1 | CPU | IOs |
+|      1 | RUN:cpu | READY   |    1 |          |     |     |
+|      2 | RUN:io  | READY   |    1 |          |     |     |
+|      3 | WAITING | RUN:cpu |    1 |        1 |     |     |
+|      4 | WAITING | RUN:cpu |    1 |        1 |     |     |
+|      5 | WAITING | RUN:cpu |    1 |        1 |     |     |
+|      6 | WAITING | DONE    |    1 |          |     |     |
+|     7* | RUN:io  | DONE    |    1 |          |     |     |
+|      8 | WAITING | DONE    |    1 |          |     |     |
+|      9 | WAITING | DONE    |    1 |          |     |     |
+|     10 | WAITING | DONE    |    1 |          |     |     |
+|     11 | WAITING | DONE    |    1 |          |     |     |
+|    12* | DONE    | DONE    |      |          |     |     |
+|        |         |         |      |          |     |     |
+| Stats: | Total   | Time    |   12 |          |     |     |
+| Stats: | CPU     | Busy    |    6 | (50.00%) |     |     |
+| Stats: | IO      | Busy    |    8 | (66.67%) |     |     |
+|        |         |         |      |          |     |     |
+
+* [[http://pages.cs.wisc.edu/~remzi/OSTEP/cpu-api.pdf][API de Processo]]
+
+** A System Call ~fork()~
+
+A chamada de sistema ~fork()~ é usada para criar um novo processo. Considerando o seguinte código:
+
+#+BEGIN_SRC C :includes <stdio.h> <stdlib.h> <unistd.h> :tangle "code/p1.c"
+  printf("hello world (pid:%d)\n", (int) getpid());
+
+  int rc = fork();
+
+  if(rc < 0) {
+    //fork failed
+    fprintf(stderr, "fork failed\n");
+    exit(1);
+   } else if (rc == 0) {
+    //child (new process)
+    printf("hello, I am child (pid:%d)\n", (int) getpid());
+   } else {
+    //parent goes down this path (main)
+    printf("hello, I am parent of %d (pid:%d)\n", rc, (int) getpid());
+   }
+#+END_SRC
+
+#+BEGIN_SRC shell :exports both
+  gcc -o p1 p1.c -Wall
+  ./p1
+#+END_SRC
+
+#+RESULTS:
+: hello world (pid:2524)
+: hello, I am parent of 2525 (pid:2524)
+: hello, I am child (pid:2525)
+
+Quando este executa, imprime na tela o PID (Process Identifier). Em seguida, chama ~fork()~, criando um
+novo processo, quase idêntico ao primeiro, se iniciando a partir da instrução do ~fork()~, mas com sua própria
+cópia do address space, seus próprios registradores, seu próprio PC, etc. A diferença é que o processo que invocou
+o ~fork()~ recebe o PID do processo filho, enquanto o processo filho recebe 0 como retorno do ~fork()~. Além disso,
+a saída desse programa é não determinística, pois quando um novo processo é invocado, qualquer um dos dois processos
+pode passar a ser executado.
+
+** A System Call ~wait()~
+
+Geralmente, um processo pai deseja que um processo filho termine sua execução, antes de prosseguir com as outras 
+instruções. Para isso, deve-se utilizar o system call ~wait()~, como demonstra o código a seguir:
+
+#+BEGIN_SRC C :includes <stdio.h> <stdlib.h> <unistd.h> :tangle "code/p2.c"
+  printf("hello world (pid:%d)\n", (int) getpid());
+
+  int rc = fork();
+
+  if(rc < 0) {
+    //fork failed
+    fprintf(stderr, "fork failed\n");
+    exit(1);
+   } else if (rc == 0) {
+    //child (new process)
+    printf("hello, I am child (pid:%d)\n", (int) getpid());
+   } else {
+    //parent goes down this path (main)
+    int rc_wait = wait(NULL);
+    printf("hello, I am parent of %d (rc_wait:%d) (pid:%d)\n", rc, rc_wait, (int) getpid());
+   }
+#+END_SRC
+
+#+BEGIN_SRC shell :exports both
+  gcc -o p2 p2.c -Wall
+  ./p2
+#+END_SRC
+
+#+RESULTS:
+: hello world (pid:2541)
+: hello, I am child (pid:2542)
+: hello, I am parent of 2542 (rc_wait:2542) (pid:2541)
+
+Desta forma, a saida do programa passa a ser determinística, já que a ordem de execução será sempre igual.
+
+** Finalmente, o System Call ~exec()~
+
+A chamada de sistema ~exec()~ serve para executar um novo programa, diferente do que o invocou.
+O código abaixo demonstra tal comportamento.
+
+#+BEGIN_SRC C :includes <stdio.h> <stdlib.h> <unistd.h> <string.h> <sys/wait.h> :tangle "code/p3.c"
+  printf("hello world (pid:%d)\n", (int) getpid());
+
+  int rc = fork();
+
+  if(rc < 0) {
+    //fork failed
+    fprintf(stderr, "fork failed\n");
+    exit(1);
+   } else if (rc == 0) {
+    //child (new process)
+    printf("hello, I am child (pid:%d)\n", (int) getpid());
+    char *myargs[3];
+    myargs[0] = strdup("wc");
+    myargs[1] = strdup("p3.c");
+    myargs[2] = NULL;
+    execvp(myargs[0], myargs);
+    printf("this shouldn't print out");
+   } else {
+    //parent goes down this path (main)
+    int rc_wait = wait(NULL);
+    printf("hello, I am parent of %d (rc_wait:%d) (pid:%d)\n", rc, rc_wait, (int) getpid());
+   }
+#+END_SRC
+
+#+BEGIN_SRC shell :exports both
+  gcc -o p3 p3.c -Wall
+  ./p3
+#+END_SRC
+
+#+RESULTS:
+: hello world (pid:2551)
+: hello, I am child (pid:2552)
+:  36  95 716 p3.c
+: hello, I am parent of 2552 (rc_wait:2552) (pid:2551)
+
+Dado um nome de um executável (e alguns argumentos), ~exec()~ carrega o código (e dados estáticos) 
+daquele executável e sobrescreve o segmento atual de código, bem como de dados estáticos, com os carregados.
+O heap, o stack e outras partes do espaço de memória de um programa são reiniciados. Então, o OS executa aquele programa.
+Logo, não cria um novo processo, mas transforma o programa corrente em um outro. Uma chamada bem sucedida de ~exec()~
+nunca retorna.
+
+** Por quê? Motivando a API
+
+A separação de ~fork()~ e ~exec()~ é fundamental na construção de um UNIX shell, pois permite a execução de código
+depois da criação de um processo e antes da execução do código do mesmo. Um comando do tipo:
+
+#+BEGIN_EXAMPLE
+  prompt> wc p3.c > newfile.txt
+#+END_EXAMPLE
+
+Redireciona a saída de ~wc p3.c~ para o arquivo ~newfile.txt~. Isto é possível pois o shell fecha o standard output
+e abre o arquivo antes da chamada de ~exec()~, e após a criação do processo com o ~fork()~. O programa a seguir
+segue o mesmo princípio.
+
+#+BEGIN_SRC C :includes <stdio.h> <stdlib.h> <unistd.h> <string.h> <fcntl.h> <sys/wait.h> :tangle "code/p4.c"
+  int rc = fork();
+
+  if (rc < 0) {
+    fprintf(stderr, "fork failed\n"); exit(1);
+   } else if (rc == 0) {
+    close(STDOUT_FILENO);
+    open("./p4.output", O_CREAT|O_WRONLY|O_TRUNC, S_IRWXU);
+
+    char *myargs[3];
+    myargs[0] = strdup("wc");
+    myargs[1] = strdup("p4.c");
+    myargs[2] = NULL;
+    execvp(myargs[0], myargs);
+   } else {
+    int rc_wait = wait(NULL);
+   }
+#+END_SRC
+
+#+BEGIN_SRC shell :exports both
+  gcc -o p4 p4.c -Wall
+  ./p4
+  cat p4.output
+#+END_SRC
+
+#+RESULTS:
+: 31  63 501 p4.c
+
+Os pipes do UNIX são implementados de forma semelhante, utilizando a chamada de sistema ~pipe()~. 
+Nela, a saída de um processo é conectado a um in-kernel *pipe*, e a entrada de outro processo é conectada
+a esse mesmo pipe. Logo, a saída de um processo serve como entrada para outro. 
+
+** Controle de Processo e Usuários
+
+Além dos comandos citados acima, existem diversas interfaces para comunicação com processos em sistemas UNIX. 
+Algumas chamadas, como ~kill()~ enviam sinais ao processo. Para que o processo reaja a tais sinais, deve-se
+utilizar a chamada ~signal()~, que suspende a execução normal na presença de determinado sinal. Para controlar
+quem pode enviar sinais a um processo, os sistemas modernos utilizam o conceito de usuários. O usuário, após
+fazer seu login com as devidas credenciais, ganha acesso aos recursos do sistema. Usuários geralmente podem controlar
+apenas seus próprios processos. 
+
+** Homework (Code)
+
+*** Questão 1
+
+#+BEGIN_SRC C :includes <stdio.h> <stdlib.h> <unistd.h> :tangle "code/cpu-api-01.c" :exports both
+  int x = 100;
+
+  int rc = fork();
+
+  if(rc < 0) {
+    fprintf(stderr, "fork failed\n");
+    exit(1);
+   } else if (rc == 0) {
+    //child
+    printf("Old value in child: %d\n", x);
+    x = 10;
+    printf("New value in child: %d\n", x);
+   } else {
+    //parent
+    printf("Old value in parent: %d\n", x);
+    x = 20;
+    printf("New value in parent: %d\n", x);
+   }
+#+END_SRC
+
+#+RESULTS:
+| Old | x | value | in | parent: | 100 |
+| New | x | value | in | parent: |  20 |
+| Old | x | value | in | child:  | 100 |
+| New | x | value | in | child:  |  10 |
+
+*** Questão 2
+
+#+BEGIN_SRC C :includes <stdio.h> <stdlib.h> <assert.h> <fcntl.h> <unistd.h> :tangle "code/cpu-api-02.c"
+  int file = open("./cpu-api-02.output", O_CREAT|O_WRONLY|O_TRUNC, S_IRWXU);
+  assert(file > -1);
+
+  int rc = fork();
+  int counter = 0;
+
+  if(rc < 0) {
+    fprintf(stderr, "fork failed\n");
+    exit(1);
+   } else if (rc == 0) {
+    //child
+    counter = write(file, "print from child\n", 17);
+    assert(counter == 17);
+    close(file);
+   } else {
+    //parent
+    counter = write(file, "print from parent\n", 18);
+    assert(counter == 18);
+    close(file);
+   }
+#+END_SRC
+
+#+RESULTS:
+
+#+BEGIN_SRC shell :exports both
+  cat ./cpu-api-02.output
+#+END_SRC
+
+#+RESULTS:
+| print | from | parent |
+| print | from | child  |
+
+*** Questão 3
+
+*** Questão 4
+
+#+BEGIN_SRC C :includes <stdio.h> <stdlib.h> <unistd.h> <string.h> <sys/wait.h> :tangle "code/cpu-api-03.c" :exports both
+  int rc = fork();
+
+  if (rc < 0) {
+    fprintf(stderr, "fork failed\n");
+    exit(1);
+   } else if (rc == 0) {
+    //execl("/bin/ls", "ls", NULL);
+    //execle("/bin/ls", "ls", NULL, NULL);
+    //execlp("/bin/ls", "ls", NULL);
+
+    char *args[] = {"ls", NULL};
+    //execv("/bin/ls", args);
+    //execvp("/bin/ls", args);
+    execvpe("/bin/ls", args, NULL);
+   } else {
+    wait(NULL);
+   }
+#+END_SRC
+
+#+RESULTS:
+| README.org        |
+| common.h          |
+| common_threads.h  |
+| cpu               |
+| cpu-api-01.c      |
+| cpu-api-02.c      |
+| cpu-api-02.output |
+| cpu-api-03        |
+| cpu-api-03.c      |
+| cpu.c             |
+| homework          |
+| io                |
+| io.c              |
+| mem               |
+| mem.c             |
+| newfile.txt       |
+| p1                |
+| p1.c              |
+| p2                |
+| p2.c              |
+| p3                |
+| p3.c              |
+| p4                |
+| p4.c              |
+| p4.output         |
+| thread            |
+| thread.c          |
+
+*** Questão 5
+
+#+BEGIN_SRC C :includes <stdio.h> <stdlib.h> <unistd.h> <sys/wait.h> :tangle "code/cpu-api-05.c" :exports both
+  int rc = fork();
+  int fpid = -1;
+
+  if (rc < 0) {
+    fprintf(stderr, "fork failed\n");
+    exit(1);
+   } else if (rc == 0) {
+    fpid = wait(NULL);
+    printf("This first. By the way, wait (in child) returned this: %d\n", fpid);
+   } else {
+    //fpid = wait(NULL);
+    printf("Then this. In parent, wait returned this: %d\n", fpid);
+   }
+#+END_SRC
+
+#+RESULTS:
+| Then this. In parent   | wait returned this: -1            |
+| This first. By the way | wait (in child) returned this: -1 |
+
+*** Questão 6
+
+#+BEGIN_SRC C :includes <stdio.h> <stdlib.h> <unistd.h> <sys/wait.h> :tangle "code/cpu-api-06.c" :exports both
+  int rc = fork();
+
+  if (rc < 0) {
+    fprintf(stderr, "fork failed\n");
+    exit(1);
+   } else if (rc == 0) {
+    printf("Child\n");
+   } else {
+    waitpid(rc, NULL, NULL);
+    printf("Parent");
+   }
+#+END_SRC
+
+#+RESULTS:
+| Child  |
+| Parent |
+
+*** Questão 7
+
+#+BEGIN_SRC C :includes <unistd.h> <stdio.h> <stdlib.h> <sys/wait.h> :tangle "code/cpu-api-07.c" :exports both
+  int rc = fork();
+
+  if (rc < 0) {
+    fprintf(stderr, "fork failed\n");
+    exit(1);
+   } else if (rc == 0) {
+    close(STDOUT_FILENO);
+    open();
+    printf("Wow, how this even worked?");
+   } else {
+    int pid = wait(NULL);
+    printf("Wait: %d\n", pid);
+   }
+#+END_SRC
+
+#+RESULTS:
+: Wait: 3350
+
+*** Questão 8
+
+#+BEGIN_SRC C :includes <unistd.h> <stdio.h> <stdlib.h> <sys/types.h> :tangle "code/cpu-api-08.c" :exports both
+  int rc1, rc2, pipefd[2];
+  char buffer[2];
+
+  if(pipe(pipefd) == -1) {
+    fprintf(stderr, "pipe failed\n");
+    exit(1);
+   }
+
+  rc1 = fork();
+
+  if (rc1 < 0) {
+    fprintf(stderr, "fork 1 failed\n");
+    exit(1);
+   } else if (rc1 == 0) {
+    close(pipefd[0]);
+    write(pipefd[1], "42", 2);
+   } else {
+    wait(NULL);
+
+    rc2 = fork();
+
+    if (rc2 < 0) {
+      fprintf(stderr, "fork 2 failed\n");
+      exit(1);
+    } else if (rc2 == 0) {
+      close(pipefd[1]);
+      read(pipefd[0], buffer, 2);
+      close(pipefd[0]);
+      printf("Hey %d, what is the answer to life the universe and everything?\n%s", (int) getpid(), buffer);    
+    } else {
+      wait(NULL);
+    }
+   }
+#+END_SRC
+
+#+RESULTS:
+| Hey | 160, | what | is | the | answer | to | life | the | universe | and | everything? |
+|  42 |      |      |    |     |        |    |      |     |          |     |             |
+
+* [[http://pages.cs.wisc.edu/~remzi/OSTEP/cpu-mechanisms.pdf][Execução Direta]]
+
+Para virtualizar a CPU, o OS deve gerenciar o compartilhamento da CPU com os vários processos em execução.
+Logo, cada processo roda por uma fração de tempo. Este processo é conhecido por *time sharing*. 
+Entretanto, algumas dificuldades surgem, pois é necessário garantir uma alta performance enquanto 
+se mantém o controle do acesso. 
+
+** Técnica Básica: Execução Direta Limitada
+
+Inicialmente, a execução direta significa que um programa roda diretamente na CPU. Quando o OS deseja
+executar algum programa, ele cria a entrada do processo na *process list*, aloca a memória necessária, 
+carrega o programa para a memória, identifica o ponto de entrada do programa e o o inicia a partir dali.
+Com isso, vários probemas são originados, levando à parte do "limitada" no nome.
+
+** Problema #1: Operações Restritas
+
+Algumas operações devem ser restritas aos processos. Um exemplo é a requisição de I/O, que se fosse liberada,
+poderia levar a um processo lendo ou escrevendo em todo o disco, podendo sobrescrever inclusive o sistema operacional,
+danificando a máquina. Assim, um novo modo de processador é introduzido, o *user mode*. Nesse modo, o código
+executado possui limitações no que pode fazer. No caso da tentativa de requisição de I/O, o processador levantaria
+uma exceção, retornando o controle ao OS, que provavelmente eliminaria o processo. Em contrapartida, existe o
+*kernel mode*, no qual o OS roda. Nesse modo, o código executado pode fazer o que desejar.
+Então, como um processo de usuário poderia realizar operações privilegiadas? A técnica desenvolvida para solucionar
+esse problema foi a criação das *system calls*.
+
+Para executar uma system call, o programa deve executar uma instrução *trap* especial. Esta instrução simultaneamente
+pula para o kernel e levanta o nível de privilégio para kernel mode. Assim, o sistema consegue realizar as operações
+requisitadas e após finalização, retornar o controle para o programa, ao mesmo tempo em que abaixa o nível de
+privilégio para user mode, através de uma instrução especial *return-from-trap*.
+
+Desta forma, o OS deve manter controle de algumas informações do processo atual, para que possa retornar a ele
+uma vez finalizadas as operações. No x86, o processador irá empilhar o program counter, flags e alguns outros registradores
+em um *kernel stack* por processo. O return-from-trap irá desempilhar esses valores do stack e continuar a execução
+da aplicação do usuário.
+
+O kernel deve tomar cuidado com o código executado dentro de uma trap, evitando que o processo que a invocou
+obtenha controle sobre o sistema, por exemplo. Para isso, o kernel configura uma *trap table* em tempo de boot.
+Quando a máquina se inicia (em kernel mode), o OS define qual código executar para cada evento excepcional. O OS 
+informa o hardware a localização desses *trap handlers*, os executando automaticamente na presença das devidas
+interrupções.
+
+Cada system call possui um *system-call number*, que deve ser apresentada pelo processo requisitor, evitando
+que o mesmo forneça um endereço do trecho de código a ser executado. 
+
+** Problema #2: Alternando Entre Processos
+
+O OS não deixa de ser um programa como qualquer outro, logo também deve compartilhar o tempo de uso da CPU.
+Como fazer então, para que o OS execute algo se o mesmo não está rodando na CPU? Como retomar o controle da CPU?
+
+Uma das estratégias adotadas é a *cooperativa*. Nela, o sistema confia que o processo irá se comportar da forma 
+devida, passando o controle para o OS periodicamente caso esteja demorando demais em sua execução. Esta transferência
+ocorre quando uma system call é invocada, ou alguma operação ilegal é executada. 
+Existe uma syscall que apenas transfere o controle. É a chamada *yield*. Obviamente, esta estratégia não é a ideal,
+pois um loop infinito acarretaria no bloqueio do sistema.
+
+Para solucionar isto, uma interrupção por tempo é introduzida, a qual retorna o controle ao OS (ao interrupt handler, no caso)
+a cada alguns milisegundos, permitindo que o sistema rode o que desejar. Assim como na chamada de uma trap,
+tal interrupção deve armazenar as informações de contexto do programa, para que se retome a execução posteriormente.
+
+Recuperado o controle, o OS deve decidir qual processo rodar em seguida. Isto é decidido pelo *scheduler*. Caso
+decida trocar de processo, um pedaço de código em baixo-nível chamado *context switch* é executado. Nele, o OS
+deve salvar alguns valores de registradores do processo atualmente em execução (em um kernel stack, por exemplo) e
+restaurar os do processo a ser executado.
+
+Para salvar o contexto do processo corrente, o OS irá salvar os registradores de propósito geral, o PC, 
+e o kernel stack pointer do processo corrente. Tendo salvo tais informações, o kernel stack do novo processo é
+carregado para essas posições, mudando o contexto. Assim, o sistema executa uma instrução return-from-trap,
+fazendo que o outro processo passe a executar.
+
+** Preocupado Com A Simultaneidade?
+
+O sistema deve se preocupar com interrupções (e trap handlers) durante interrupções. Acionada uma interrupção,
+o OS irá realizar algum processamento. Durante esse tempo, novas interrupções podem surgir. Uma estratégia
+para evitar esse cenário é desabilitar as interrupções nesse período. Deve-se tomar cuidado para que interrupções
+também não sejam perdidas.
+
+** Homework
+
+#+BEGIN_SRC C :tangle "code/cpu-mechanisms.c"
+
+#+END_SRC
