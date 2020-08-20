@@ -1197,3 +1197,1197 @@ também não sejam perdidas.
 
 #+RESULTS:
 | Start: 478966ms | End: 482957ms | Elapsed: 3991ms | N: 1000 | Average Cost 3ms |
+
+* [[http://pages.cs.wisc.edu/~remzi/OSTEP/cpu-sched.pdf][Agendamento (Scheduling): Introdução]]
+
+Os *mecanismos* de execução de um processo foram estudados nas seções anteriores. Resta agora compreender como o
+sistema determina em alto nível quais processos executarão, ou seja as *políticas* adotadas por ele. Logo, 
+serão estudadas uma série de políticas de agendamento (scheduling policies) desenvolvidas ao longo dos anos.
+
+** Premissas Relacionadas À Carga De Trabalho
+
+Para simplificar a política apresentada, algumas premissas sobre o processo em execução são feitas. São elas:
+1. Cada tarefa é executada pela mesma quantidade de tempo
+2. Todas as tarefas são requisitadas ao mesmo tempo
+3. Após iniciados, cada tarefa executa até que esteja completa
+4. Todos as tarefas utilizam apenas a CPU
+5. O tempo de execução de cada tarefa é conhecido
+
+Ao longo do capítulo, essas premissas são desfeitas, permitindo a aproximação de uma situação real.
+
+** Métricas De Agendamento
+
+Além das premissas sobre a carga de trabalho, é necessário estabelecer *scheduling metrics*. Inicialmente, 
+será utilizado apenas o *turnaround time*, definido pelo tempo em que cada *job* termina sua execução menos
+o tempo em que chegou no sistema. Pela premissa 2, este tempo se iguala ao tempo de conclusão (em um primeiro 
+momento). Vale notar que tal métrica busca medir a performance do *scheduler*.
+
+** Primeiro A Entrar, Primeiro A Sair (First In, First Out): FIFO
+
+Algoritmo simples, em que cada processo executa até que seja finalizado, por ordem de chegada. Caso um processo
+demore bastante tempo a finalizar, outros que chegaram logo após ficarão em espera. Assim, o *turnaround time*
+aumentará consideravelmente. Este problema é conhecido como *efeito convoy*.
+
+** Menor Trabalho Primeiro (Shortest Job First)
+
+Por executar os menores trabalhos primeiro, o turnaround time diminui consideravelmente (em situações na qual a 
+premissa 2 ainda seja seguida). Caso os processos cheguem ao sistema em tempos diferentes, é possível que
+uma tarefa longa esteja em execução, colocando os outros em espera, aumentando o turnaround.
+
+** Menor Tempo-A-Completar Primeiro (Shortest Time-To-Completion First)
+
+Retirando a premissa 3, é possível solucionar o problema acima, ao interromper a execução de um processo longo
+para que outros mais rápidos executem. O algoritmo STCF adiciona preempção ao SJF. Assim, quando um job chega
+ao sistema, o mesmo determina qual dos trabalhos possuem menos tempo de execução restante. Possui ótimo 
+turnaround time. Não muito boa em tempo de resposta.
+
+** Uma Nova Métrica: Tempo De Resposta
+
+Sabendo o tempo de finalização dos trabalhos, e considerando que apenas a CPU seja utilizada e a única métrica
+disponível seja a turnaround, STCF aparece como uma ótima política. Entretanto, em sistemas interativos, é necessária
+a criação de uma nova métrica, o tempo de resposta (response time). O tempo de resposta corresponde ao período 
+entre a chegada de um processo ao sistema e a primeira execução do mesmo.
+
+** Round Robin
+
+Ao invés de rodar os processos até a conclusão, o algoritmo RR executa o trabalho por uma fatia de tempo (time slice,
+também chamada de scheduling quantum), trocando em seguida para a próxima tarefa na fila, e assim repetidamente.
+Assim, RR por vezes é chamado de time-slicing. Vale notar que uma fatia do tempo deve ser um múltiplo do
+período de interrupção por timer, sendo o tempo de resposta diretamente proporcional à fatia escolhida
+para cada processo. Deve-se levar em conta que valores muito pequenos para a fatia de tempo podem fazer
+com que a troca de contexto demore mais que a execução do processo em si, diminuindo a responsividade do sistema.
+
+Apesar de apresentar bons resultados em tempo de resposta, acaba ficando para trás em turnaround time. Isto porque
+cada processo é alongado ao máximo, executando vários de uma única vez. Qualquer política que seja justa (*fair*),
+dividindo recursos ao longo do tempo com vários processos tende a apresentar resultados ruins em turnaround time. 
+O oposto também é verdadeiro, já que monopolizar recursos tende a melhorar o turnaround time. 
+
+** Incorporando I/O
+
+Na presença de requisições de I/O, o sistema deve ajustar a escala dos processos de acordo com a conclusão da requisição.
+Supondo um escalonador STCF nessas condições, não é vantajoso que um processo seja executado por completo, antes
+que outro entre em execução, visto que durante as requisições, o mesmo se encontrará bloqueado, e consequentemente,
+não estará utilizando da CPU.
+Então, cada sub-tarefa do processo (entre as requisições)
+é tradada separadamente, no que diz respeito à alocação do processo na fila.
+Assim, o sistema operacional considera finalizado o trabalho durante a requisição de I/O, executando outro enquanto isso.
+
+** Homework
+
+*** Questão 1
+
+#+BEGIN_SRC shell :results value verbatim
+  ./homework/cpu-sched/scheduler.py -p SJF -j 3 -l 200,200,200 -c
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+ARG policy SJF
+ARG jlist 200,200,200
+
+Here is the job list, with the run time of each job: 
+  Job 0 ( length = 200.0 )
+  Job 1 ( length = 200.0 )
+  Job 2 ( length = 200.0 )
+
+
+,** Solutions **
+
+Execution trace:
+  [ time   0 ] Run job 0 for 200.00 secs ( DONE at 200.00 )
+  [ time 200 ] Run job 1 for 200.00 secs ( DONE at 400.00 )
+  [ time 400 ] Run job 2 for 200.00 secs ( DONE at 600.00 )
+
+Final statistics:
+  Job   0 -- Response: 0.00  Turnaround 200.00  Wait 0.00
+  Job   1 -- Response: 200.00  Turnaround 400.00  Wait 200.00
+  Job   2 -- Response: 400.00  Turnaround 600.00  Wait 400.00
+
+  Average -- Response: 200.00  Turnaround 400.00  Wait 200.00
+
+#+end_example
+
+
+#+BEGIN_SRC shell :results value verbatim
+  ./homework/cpu-sched/scheduler.py -p FIFO -j 3 -l 200,200,200 -c
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+ARG policy FIFO
+ARG jlist 200,200,200
+
+Here is the job list, with the run time of each job: 
+  Job 0 ( length = 200.0 )
+  Job 1 ( length = 200.0 )
+  Job 2 ( length = 200.0 )
+
+
+,** Solutions **
+
+Execution trace:
+  [ time   0 ] Run job 0 for 200.00 secs ( DONE at 200.00 )
+  [ time 200 ] Run job 1 for 200.00 secs ( DONE at 400.00 )
+  [ time 400 ] Run job 2 for 200.00 secs ( DONE at 600.00 )
+
+Final statistics:
+  Job   0 -- Response: 0.00  Turnaround 200.00  Wait 0.00
+  Job   1 -- Response: 200.00  Turnaround 400.00  Wait 200.00
+  Job   2 -- Response: 400.00  Turnaround 600.00  Wait 400.00
+
+  Average -- Response: 200.00  Turnaround 400.00  Wait 200.00
+
+#+end_example
+
+** Questão 2
+
+#+BEGIN_SRC shell :results value verbatim
+  ./homework/cpu-sched/scheduler.py -p SJF -j 3 -l 100,200,300 -c
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+ARG policy SJF
+ARG jlist 100,200,300
+
+Here is the job list, with the run time of each job: 
+  Job 0 ( length = 100.0 )
+  Job 1 ( length = 200.0 )
+  Job 2 ( length = 300.0 )
+
+
+,** Solutions **
+
+Execution trace:
+  [ time   0 ] Run job 0 for 100.00 secs ( DONE at 100.00 )
+  [ time 100 ] Run job 1 for 200.00 secs ( DONE at 300.00 )
+  [ time 300 ] Run job 2 for 300.00 secs ( DONE at 600.00 )
+
+Final statistics:
+  Job   0 -- Response: 0.00  Turnaround 100.00  Wait 0.00
+  Job   1 -- Response: 100.00  Turnaround 300.00  Wait 100.00
+  Job   2 -- Response: 300.00  Turnaround 600.00  Wait 300.00
+
+  Average -- Response: 133.33  Turnaround 333.33  Wait 133.33
+
+#+end_example
+
+#+BEGIN_SRC shell :results value verbatim
+  ./homework/cpu-sched/scheduler.py -p FIFO -j 3 -l 100,200,300 -c
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+ARG policy FIFO
+ARG jlist 100,200,300
+
+Here is the job list, with the run time of each job: 
+  Job 0 ( length = 100.0 )
+  Job 1 ( length = 200.0 )
+  Job 2 ( length = 300.0 )
+
+
+,** Solutions **
+
+Execution trace:
+  [ time   0 ] Run job 0 for 100.00 secs ( DONE at 100.00 )
+  [ time 100 ] Run job 1 for 200.00 secs ( DONE at 300.00 )
+  [ time 300 ] Run job 2 for 300.00 secs ( DONE at 600.00 )
+
+Final statistics:
+  Job   0 -- Response: 0.00  Turnaround 100.00  Wait 0.00
+  Job   1 -- Response: 100.00  Turnaround 300.00  Wait 100.00
+  Job   2 -- Response: 300.00  Turnaround 600.00  Wait 300.00
+
+  Average -- Response: 133.33  Turnaround 333.33  Wait 133.33
+
+#+end_example
+
+** Questão 3
+
+
+#+BEGIN_SRC shell :results value verbatim
+  ./homework/cpu-sched/scheduler.py -p RR -j 3 -l 10,20,30 -q 1 -c
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+ARG policy RR
+ARG jlist 10,20,30
+
+Here is the job list, with the run time of each job: 
+  Job 0 ( length = 10.0 )
+  Job 1 ( length = 20.0 )
+  Job 2 ( length = 30.0 )
+
+
+,** Solutions **
+
+Execution trace:
+  [ time   0 ] Run job   0 for 1.00 secs
+  [ time   1 ] Run job   1 for 1.00 secs
+  [ time   2 ] Run job   2 for 1.00 secs
+  [ time   3 ] Run job   0 for 1.00 secs
+  [ time   4 ] Run job   1 for 1.00 secs
+  [ time   5 ] Run job   2 for 1.00 secs
+  [ time   6 ] Run job   0 for 1.00 secs
+  [ time   7 ] Run job   1 for 1.00 secs
+  [ time   8 ] Run job   2 for 1.00 secs
+  [ time   9 ] Run job   0 for 1.00 secs
+  [ time  10 ] Run job   1 for 1.00 secs
+  [ time  11 ] Run job   2 for 1.00 secs
+  [ time  12 ] Run job   0 for 1.00 secs
+  [ time  13 ] Run job   1 for 1.00 secs
+  [ time  14 ] Run job   2 for 1.00 secs
+  [ time  15 ] Run job   0 for 1.00 secs
+  [ time  16 ] Run job   1 for 1.00 secs
+  [ time  17 ] Run job   2 for 1.00 secs
+  [ time  18 ] Run job   0 for 1.00 secs
+  [ time  19 ] Run job   1 for 1.00 secs
+  [ time  20 ] Run job   2 for 1.00 secs
+  [ time  21 ] Run job   0 for 1.00 secs
+  [ time  22 ] Run job   1 for 1.00 secs
+  [ time  23 ] Run job   2 for 1.00 secs
+  [ time  24 ] Run job   0 for 1.00 secs
+  [ time  25 ] Run job   1 for 1.00 secs
+  [ time  26 ] Run job   2 for 1.00 secs
+  [ time  27 ] Run job   0 for 1.00 secs ( DONE at 28.00 )
+  [ time  28 ] Run job   1 for 1.00 secs
+  [ time  29 ] Run job   2 for 1.00 secs
+  [ time  30 ] Run job   1 for 1.00 secs
+  [ time  31 ] Run job   2 for 1.00 secs
+  [ time  32 ] Run job   1 for 1.00 secs
+  [ time  33 ] Run job   2 for 1.00 secs
+  [ time  34 ] Run job   1 for 1.00 secs
+  [ time  35 ] Run job   2 for 1.00 secs
+  [ time  36 ] Run job   1 for 1.00 secs
+  [ time  37 ] Run job   2 for 1.00 secs
+  [ time  38 ] Run job   1 for 1.00 secs
+  [ time  39 ] Run job   2 for 1.00 secs
+  [ time  40 ] Run job   1 for 1.00 secs
+  [ time  41 ] Run job   2 for 1.00 secs
+  [ time  42 ] Run job   1 for 1.00 secs
+  [ time  43 ] Run job   2 for 1.00 secs
+  [ time  44 ] Run job   1 for 1.00 secs
+  [ time  45 ] Run job   2 for 1.00 secs
+  [ time  46 ] Run job   1 for 1.00 secs
+  [ time  47 ] Run job   2 for 1.00 secs
+  [ time  48 ] Run job   1 for 1.00 secs ( DONE at 49.00 )
+  [ time  49 ] Run job   2 for 1.00 secs
+  [ time  50 ] Run job   2 for 1.00 secs
+  [ time  51 ] Run job   2 for 1.00 secs
+  [ time  52 ] Run job   2 for 1.00 secs
+  [ time  53 ] Run job   2 for 1.00 secs
+  [ time  54 ] Run job   2 for 1.00 secs
+  [ time  55 ] Run job   2 for 1.00 secs
+  [ time  56 ] Run job   2 for 1.00 secs
+  [ time  57 ] Run job   2 for 1.00 secs
+  [ time  58 ] Run job   2 for 1.00 secs
+  [ time  59 ] Run job   2 for 1.00 secs ( DONE at 60.00 )
+
+Final statistics:
+  Job   0 -- Response: 0.00  Turnaround 28.00  Wait 18.00
+  Job   1 -- Response: 1.00  Turnaround 49.00  Wait 29.00
+  Job   2 -- Response: 2.00  Turnaround 60.00  Wait 30.00
+
+  Average -- Response: 1.00  Turnaround 45.67  Wait 25.67
+
+#+end_example
+
+** Questão 4
+
+Quando as tarefas estão em ordem crescente de tamanho
+
+** Questão 5
+
+#+BEGIN_SRC shell :results value verbatim
+  ./homework/cpu-sched/scheduler.py -p RR -j 3 -l 10,10,10 -q 10 -c
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+ARG policy RR
+ARG jlist 10,10,10
+
+Here is the job list, with the run time of each job: 
+  Job 0 ( length = 10.0 )
+  Job 1 ( length = 10.0 )
+  Job 2 ( length = 10.0 )
+
+
+,** Solutions **
+
+Execution trace:
+  [ time   0 ] Run job   0 for 10.00 secs ( DONE at 10.00 )
+  [ time  10 ] Run job   1 for 10.00 secs ( DONE at 20.00 )
+  [ time  20 ] Run job   2 for 10.00 secs ( DONE at 30.00 )
+
+Final statistics:
+  Job   0 -- Response: 0.00  Turnaround 10.00  Wait 0.00
+  Job   1 -- Response: 10.00  Turnaround 20.00  Wait 10.00
+  Job   2 -- Response: 20.00  Turnaround 30.00  Wait 20.00
+
+  Average -- Response: 10.00  Turnaround 20.00  Wait 10.00
+
+#+end_example
+
+#+BEGIN_SRC shell :results value verbatim
+  ./homework/cpu-sched/scheduler.py -p SJF -j 3 -l 10,10,10 -c
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+ARG policy SJF
+ARG jlist 10,10,10
+
+Here is the job list, with the run time of each job: 
+  Job 0 ( length = 10.0 )
+  Job 1 ( length = 10.0 )
+  Job 2 ( length = 10.0 )
+
+
+,** Solutions **
+
+Execution trace:
+  [ time   0 ] Run job 0 for 10.00 secs ( DONE at 10.00 )
+  [ time  10 ] Run job 1 for 10.00 secs ( DONE at 20.00 )
+  [ time  20 ] Run job 2 for 10.00 secs ( DONE at 30.00 )
+
+Final statistics:
+  Job   0 -- Response: 0.00  Turnaround 10.00  Wait 0.00
+  Job   1 -- Response: 10.00  Turnaround 20.00  Wait 10.00
+  Job   2 -- Response: 20.00  Turnaround 30.00  Wait 20.00
+
+  Average -- Response: 10.00  Turnaround 20.00  Wait 10.00
+
+#+end_example
+
+** Questão 6
+
+#+BEGIN_SRC shell :results value verbatim
+  ./homework/cpu-sched/scheduler.py -p SJF -j 3 -l 10,10,10 -c
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+ARG policy SJF
+ARG jlist 10,10,10
+
+Here is the job list, with the run time of each job: 
+  Job 0 ( length = 10.0 )
+  Job 1 ( length = 10.0 )
+  Job 2 ( length = 10.0 )
+
+
+,** Solutions **
+
+Execution trace:
+  [ time   0 ] Run job 0 for 10.00 secs ( DONE at 10.00 )
+  [ time  10 ] Run job 1 for 10.00 secs ( DONE at 20.00 )
+  [ time  20 ] Run job 2 for 10.00 secs ( DONE at 30.00 )
+
+Final statistics:
+  Job   0 -- Response: 0.00  Turnaround 10.00  Wait 0.00
+  Job   1 -- Response: 10.00  Turnaround 20.00  Wait 10.00
+  Job   2 -- Response: 20.00  Turnaround 30.00  Wait 20.00
+
+  Average -- Response: 10.00  Turnaround 20.00  Wait 10.00
+
+#+end_example
+
+#+BEGIN_SRC shell :results value verbatim
+  ./homework/cpu-sched/scheduler.py -p SJF -j 3 -l 400,400,400 -c
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+ARG policy SJF
+ARG jlist 400,400,400
+
+Here is the job list, with the run time of each job: 
+  Job 0 ( length = 400.0 )
+  Job 1 ( length = 400.0 )
+  Job 2 ( length = 400.0 )
+
+
+,** Solutions **
+
+Execution trace:
+  [ time   0 ] Run job 0 for 400.00 secs ( DONE at 400.00 )
+  [ time 400 ] Run job 1 for 400.00 secs ( DONE at 800.00 )
+  [ time 800 ] Run job 2 for 400.00 secs ( DONE at 1200.00 )
+
+Final statistics:
+  Job   0 -- Response: 0.00  Turnaround 400.00  Wait 0.00
+  Job   1 -- Response: 400.00  Turnaround 800.00  Wait 400.00
+  Job   2 -- Response: 800.00  Turnaround 1200.00  Wait 800.00
+
+  Average -- Response: 400.00  Turnaround 800.00  Wait 400.00
+
+#+end_example
+
+** Questão 7
+
+Tempo de resposta aumenta. Para o último, (n - 1) quantas serão executadas antes que a enésima comece.
+Logo, o tempo de resposta do último será $$q * (n - 1)$$
+
+* [[http://pages.cs.wisc.edu/~remzi/OSTEP/cpu-sched-mlfq.pdf][Scheduling: The Multi-Level Feedback Queue]]
+
+Nesta seção, é apresentado o scheduler MLFQ (Multi-Level Feedback Queue), descrito por Corbato em 1962.
+Tal algoritmo rendeu a ele o Prêmio Turing. Tal scheduler visa otimizar o turnaround time. Como visto anteriormente,
+isto é geralmente alcançado ao rodar primeiro programas que terminem primeiro. Entretanto, não se sabe a duração
+de execução desses processos. Em segundo lugar, busca deixar o sistema responsivo a interação dos usuários, 
+minimizando, assim, o tempo de resposta.
+
+** MLFQ: Regras Básicas
+
+Existem várias implementações do MLFQ. A maioria delas compartilham similaridades. A MLFQ descrita a seguir 
+possui queues (filas) distintas, cada uma com um nível de prioridade. Em qualquer momento, um job que está 
+pronto (ready) está localizado em uma única fila. Processos com prioridades maiores vão rodar, em detrimento
+dos com prioridades menores. Caso tenham a mesma prioridade, rodam em Round Robin. 
+Logo, cabe ao MLFQ designar as prioridades para cada trabalho. Esta prioridade é variável, de acordo com o 
+comportamento observado pelo OS. 
+
+** Tentativa #1: Como Mudar As Prioridades
+
+Levando em conta que o workload (carga de trabalho) consiste em uma mistura de jobs interativos (e de execução
+curta) e jobs longos (com grande demanda de CPU), algumas regras são adicionadas numa tentativa de melhorar o 
+desempenho: 
+- Ao entrar no sistema, um processo é colocado na fila de maior prioridade.
+- Caso um processo utilize toda a fatia de tempo enquanto roda, sua prioridade é reduzida.
+- Caso um processo entregue o controle da CPU antes que sua fatia de tempo se esgote, ele continua na mesma fila.
+
+Assim, mesmo que o sistema não saiba se o processo é demorado ou não, ele assume que seja curto, colocando
+todos na maior prioridade no início. Se estiver certo, o processo continuará nas filas de alta prioridade, 
+sendo assim executado mais rapidamente. Em caso de palpite incorreto, o processo acabará caindo nas filas de baixa
+prioridade, sendo executado depois. Nesse sentido, o MLFQ se aproxima do SJF. Em jobs com requisição de I/O, o
+processo entrega o controle da CPU antes do tempo, assim não pode ser penalizado, logo continuando na mesma fila.
+
+Entretanto, tal estratégia apresenta problemas. O primeiro, starvation, descreve a situação em que existem vários
+processos interativos no sistema, que combinados ocupam todo o tempo de CPU. Dessa forma, os processos de baixa 
+prioridade não são executados. O segundo envolve um processo que *game the schedule*, ou seja, que monopoliza o tempo
+de CPU ao fazer uma requisição de I/O logo antes do fim da fatia de tempo. Por último, um programa pode mudar de 
+comportamento ao longo do tempo, visto que da forma como está, não é possível que um processo aumente sua prioridade.
+
+** Tentativa #2: O Impulso De Prioridade (The Priority Boost)
+
+Buscando resolver o problema de starvation (e o da mudança de comportamentos ao longo do tempo), decide-se
+periodicamente impulsionar todos os processos, os colocando na fila de maior prioridade a cada período S.
+Esse tempo S é algo arbitrário, não sendo possível determinar um valor que atenda perfeitamente a todas as situações.
+
+** Tentativa #3: Melhor Contabilidade
+
+Para prevenir o gaming of the scheduler, altera-se a regra que mantém um processo na mesma fila caso sua execução
+devolva o controle antes que acabe a fatia de tempo para uma que contabiliza o tempo de execução do processo.
+Caso a tarefa demore mais que a quota permitida para cada fila, sua prioridade é diminuida, não levando em consideração
+quantas vezes o controle foi devolvido para o OS.
+
+** Ajustando MLFQ E Outros Problemas
+
+Um outro problema desse scheduler é pertinente às configurações de cada parâmetro. Número de filas, fatia de 
+tempo por fila, periodicidade do impulso de prioridade, etc. Em algumas implementações, cada fila possui
+fatias de tempo diferentes. É possível também que outras formas de priorização sejam utilizadas, como formulação
+matemática, de acordo o uso da CPU, por exemplo.
+
+** Sumário De Regras
+
+1- Se prioridade de A for maior que a de B, A roda e B não
+2- Se prioridade de A for igual a de B, rodam em RR, utilizando a fatia de tempo (quanta) da fila
+3- Quando um processo entra no sistema, é colocado na fila de maior prioridade
+4- Quando um processo usa uma fração de tempo definida (independente de quantas vezes ele devolveu o controle), o mesmo 
+tem sua prioridade reduzida
+5- Após um período de tempo S, todos os processos são movidos para a fila superior
+
+* [[http://pages.cs.wisc.edu/~remzi/OSTEP/cpu-sched-lottery.pdf][Scheduling: Proportional Share]]
+
+Nesta seção é abordado um scheduler conhecido como *proportional-share* (ou *fair-share*). Ao invés de 
+se otimizar turnaround time ou response time, este scheduler visa garantir que cada job recebe uma certa
+porcentagem de uso da CPU.
+Um exemplo de scheduler por proportional-share é criado por Waldspurger e Weihl, conhecido como *lottery scheduling*.
+Nele, periodicamente é feito um sorteio para determinar qual processo será executado a seguir. Processos que deveriam
+rodar mais frequentemente possuem mais chances de ganhar o sorteio.
+
+** Conceitos Básicos: Tickets Representando Sua Parte
+
+Cada processo recebe um número de tickets de acordo com o uso de CPU a ser destinado a ele. Então, um número aleatório é 
+sorteado (entre todos os valores de tickets disponíveis). O processo com o ticket sorteado executa até o próximo 
+sorteio.
+
+** Mecanismos De Ticket
+
+Scheduling por loteria fornecem mecanismos para manipular tickets de várias formas. 
+Um desses mecanismos é o de *ticket currency*. Nele, um usuário pode alocar quantos tickets quiser para cada processo,
+mesmo que este valor não seja o determinado pelo sistema. Supondo que dois usuários recebam 100 tickets, por exemplo,
+O primeiro usuário pode rodar dois processos alocando 500 tickets para cada, enquanto o segundo pode rodar
+1 processo com 10 tickets. Cabe ao OS converter os tickets utilizados por cada processo em uma moeda global.
+
+Outro mecanismo é o de transferência de tickets, que corresponde a um processo entregar temporariamente
+seus tickets para outro (server e client, por exemplo). Por fim, existe a inflação de ticket, útil em alguns 
+cenários. Nesse caso, um processo consegue aumentar ou diminuir seu próprio número de tickets (utilizado
+em ambientes onde haja um grupo de processos com confiança mútua). 
+
+** Implementação
+
+Para implementação, é necessário um gerador de números aleatórios, uma estrutura de dados para registrar os
+processos (uma lista) e o número total de tickets.
+Um valor aleatório é escolhido, e a lista é percorrida. Em cada elemento, o número de tickets do mesmo é 
+somado a um contador (inicialmente 0). Depois da soma, faz-se a comparação entre o valor do contador com o gerado. 
+Caso o contador tenha ultrapassado, o processo em questão é escolhido. Caso não, passa-se para o outro elemento da
+lista.
+
+#+BEGIN_SRC C :includes <stdio.h> <stdlib.h> <string.h> <assert.h> :tangle "code/lottery.c" :exports both :main no :cmdline 100 5 :results value verbatim
+
+  int global_tickets = 0;
+
+  struct node_t {
+    int car;
+    struct node_t *cdr;
+  };
+
+  struct node_t *list = NULL;
+
+  void cons(int car) {
+    struct node_t *tmp = malloc(sizeof(struct node_t));
+    assert(tmp != NULL);
+
+    tmp->car = car;
+    tmp->cdr = list;
+
+    list = tmp;
+    global_tickets += car;
+  }
+
+  void print_list() {
+    struct node_t *curr = list;
+    printf("'List: ");
+    while (curr) {
+      printf("[%d]", curr->car);
+      curr = curr->cdr;
+    }
+    printf("\n");
+  }
+
+  int main(int argc, char* argv[]) {
+    if (argc != 3) {
+      fprintf(stderr, "usage: lottery <seed> <loops>\n");
+      exit(1);
+    }
+
+    int seed = atoi(argv[1]);
+    int loops = atoi(argv[2]);
+    srandom(seed);
+
+    cons(50); cons(100); cons(25);
+
+    int i, counter, winner;
+    struct node_t *current;
+    for (i = 0; i < loops; i++) {
+      counter = 0;
+      winner = random() % global_tickets;
+      current = list;
+
+      while (current) {
+	counter = counter + current->car;
+	if (counter > winner) break;
+	current = current->cdr;
+      }
+
+      print_list();
+      printf("winner: %d %d\n\n", winner, current->car);
+    }
+
+    return 0;
+  }
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+'List: [25][100][50]
+winner: 15 25
+
+'List: [25][100][50]
+winner: 1 25
+
+'List: [25][100][50]
+winner: 154 50
+
+'List: [25][100][50]
+winner: 59 100
+
+'List: [25][100][50]
+winner: 156 50
+#+end_example
+
+** Exemplo
+
+Supondo dois jobs, com o mesmo tempo de execução, e com o mesmo número de tickets. Nesse cenário, deseja-se que 
+ambos concluam quase ao mesmo tempo. Para medir isto, uma métrica chamada *unfairness metric* U é criada. Nela,
+o tempo em que o primeiro trabalho se encerra é dividido pelo tempo do segundo. Quanto mais próximo de um, melhor. 
+Nessas condições, observa-se que o U dos processos se aproxima de um a medida que o tamanho dos processos aumenta.
+
+** Como Designar Tickets
+
+Um problema ainda não abordado é a da alocação dos tickets por processo. Como o sistema deve distribuir os tickets
+entre os processos existentes? É possível que ele apenas deixe para o usuário a alocação dos tickets, distribuindo
+para este um número determinado. Mas isto ainda não é a solução desejada.
+
+** Por Que Não Determinístico?
+
+Apesar de apresentar um scheduler simples e aproximadamente correto, a aleatoriedade pode atrapalhar nas proporções
+corretas, principalmente em jobs curtos. Visando solucionar este problema, Waldspurger inventou o *stride scheduling*,
+um scheduler fair-share determinístico. Nele, cada processo possui um *stride* e um *pass*. Para determinar o 
+stride de cada processo, divide-se um número grande pelo número de tickets de cada um. Já o pass corresponde
+a um counter, inicialmente em zero, e que é incrementado toda vez que um processo roda. O valor adicionado é o do 
+stride do processo. O algoritmo sempre seleciona o processo com menor pass para execução. Ao final do ciclo
+de scheduling, as proporções exatas de execução serão atingidas. Entretanto, caso um novo processo entre
+no meio do ciclo, ele monopolizará a CPU, visto que o valor de pass dele será bem inferior ao dos outros.
+
+** O Completely Fair Scheduler Do Linux
+
+No CFS, o scheduler não se baseia em uma fração fixa do tempo, e sim por uma técnica de contagem conhecida
+como *virtual runtime (vruntime)*. A medida que um processo executa, ele acumula vruntime. No caso mais
+simples, o vruntime de todos os processos incrementam em valores iguais, relativos ao tempo físico. Quando uma decisão
+de schedule acontece, o processo com menor vruntime acumulado executa a seguir.
+
+Assim, é necessário balancear o tempo de troca entre os processos. Se este valor for pequeno, fairness é atingido,
+a um custo de performance (troca de contexto frequente), e vice-versa. Para resolver tal problema, o CFS
+utiliza alguns parâmetros de controle. O primeiro, *sched_latency* determina quanto tempo um processo executa
+até uma troca. Nesse período, o CFS garante a fairness ao dividir esse tempo pelo número de processos. Assim,
+todos executam. Para evitar que o time slice seja reduzido a ponto de causar um overhead de scheduling por context
+switch, o CFS utiliza o parâmetro *min_granularity*, que limita o time slice mínimo possível.
+
+*** Weighting (Niceness)
+
+Também é possível que processos recebam prioridades. Utiliza, para isso, de um mecanismo UNIX chamado nível *nice*,
+que vai de -20 a +19. O CFS utiliza do valor *nice* para mapear o processo a um peso, por uma tabela. 
+Assim, a fatia de tempo de um processo será definida pela multiplicação do sched_latency pela fração
+do peso do processo sobre a somatória dos pesos de todos os processos. O total de vruntime acumulado por um processo
+também deve ser proporcional a esse peso, senão um processo com prioridade, que executou durante um periodo maior, 
+ficará esperando por um bom tempo.
+
+*** Usando Árvores Vermelho-Preto
+
+Um dos maiores focos do CFS é a eficiência. Um dos elementos que deve ser otimizado é a busca pelo próximo
+processo a rodar. Sistemas modernos são compostos de centenas de processos, e estruturas como listas não 
+escalonam bem o suficiente. Então, o CFS utiliza-se de uma *red-black tree* para armazenar os processos.
+Apenas processos em execução ou prontos para são armazenados. Na árvore, os processos são ordenados
+por vruntime, e as operações são logarítmicas.
+
+*** Lidando Com I/O E Processos Em Espera
+
+Caso um processo entre em espera, quando voltar, seu vruntime será bem inferior ao dos outros processos, assim
+monopolizando o uso da CPU. Pra evitar que isso ocorra, o CFS altera o vruntime de uma tarefa quando volta
+para a árvore. Ela recebe um vruntime equivalente ao menor valor encontrado na árvore.
+
+** Homework
+
+*** Questão 1
+
+#+BEGIN_SRC shell :results value verbatim
+  ./homework/cpu-sched-lottery/lottery.py -s 1 -j 3 -c
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+ARG jlist 
+ARG jobs 3
+ARG maxlen 10
+ARG maxticket 100
+ARG quantum 1
+ARG seed 1
+
+Here is the job list, with the run time of each job: 
+  Job 0 ( length = 1, tickets = 84 )
+  Job 1 ( length = 7, tickets = 25 )
+  Job 2 ( length = 4, tickets = 44 )
+
+
+,** Solutions **
+
+Random 651593 -> Winning ticket 119 (of 153) -> Run 2
+  Jobs:
+ (  job:0 timeleft:1 tix:84 )  (  job:1 timeleft:7 tix:25 )  (* job:2 timeleft:4 tix:44 ) 
+Random 788724 -> Winning ticket 9 (of 153) -> Run 0
+  Jobs:
+ (* job:0 timeleft:1 tix:84 )  (  job:1 timeleft:7 tix:25 )  (  job:2 timeleft:3 tix:44 ) 
+--> JOB 0 DONE at time 2
+Random 93859 -> Winning ticket 19 (of 69) -> Run 1
+  Jobs:
+ (  job:0 timeleft:0 tix:--- )  (* job:1 timeleft:7 tix:25 )  (  job:2 timeleft:3 tix:44 ) 
+Random 28347 -> Winning ticket 57 (of 69) -> Run 2
+  Jobs:
+ (  job:0 timeleft:0 tix:--- )  (  job:1 timeleft:6 tix:25 )  (* job:2 timeleft:3 tix:44 ) 
+Random 835765 -> Winning ticket 37 (of 69) -> Run 2
+  Jobs:
+ (  job:0 timeleft:0 tix:--- )  (  job:1 timeleft:6 tix:25 )  (* job:2 timeleft:2 tix:44 ) 
+Random 432767 -> Winning ticket 68 (of 69) -> Run 2
+  Jobs:
+ (  job:0 timeleft:0 tix:--- )  (  job:1 timeleft:6 tix:25 )  (* job:2 timeleft:1 tix:44 ) 
+--> JOB 2 DONE at time 6
+Random 762280 -> Winning ticket 5 (of 25) -> Run 1
+  Jobs:
+ (  job:0 timeleft:0 tix:--- )  (* job:1 timeleft:6 tix:25 )  (  job:2 timeleft:0 tix:--- ) 
+Random 2106 -> Winning ticket 6 (of 25) -> Run 1
+  Jobs:
+ (  job:0 timeleft:0 tix:--- )  (* job:1 timeleft:5 tix:25 )  (  job:2 timeleft:0 tix:--- ) 
+Random 445387 -> Winning ticket 12 (of 25) -> Run 1
+  Jobs:
+ (  job:0 timeleft:0 tix:--- )  (* job:1 timeleft:4 tix:25 )  (  job:2 timeleft:0 tix:--- ) 
+Random 721540 -> Winning ticket 15 (of 25) -> Run 1
+  Jobs:
+ (  job:0 timeleft:0 tix:--- )  (* job:1 timeleft:3 tix:25 )  (  job:2 timeleft:0 tix:--- ) 
+Random 228762 -> Winning ticket 12 (of 25) -> Run 1
+  Jobs:
+ (  job:0 timeleft:0 tix:--- )  (* job:1 timeleft:2 tix:25 )  (  job:2 timeleft:0 tix:--- ) 
+Random 945271 -> Winning ticket 21 (of 25) -> Run 1
+  Jobs:
+ (  job:0 timeleft:0 tix:--- )  (* job:1 timeleft:1 tix:25 )  (  job:2 timeleft:0 tix:--- ) 
+--> JOB 1 DONE at time 12
+
+#+end_example
+
+*** Questão 2
+
+#+BEGIN_SRC shell :results value verbatim
+  ./homework/cpu-sched-lottery/lottery.py -l 10:1,10:100 -c
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+ARG jlist 10:1,10:100
+ARG jobs 3
+ARG maxlen 10
+ARG maxticket 100
+ARG quantum 1
+ARG seed 0
+
+Here is the job list, with the run time of each job: 
+  Job 0 ( length = 10, tickets = 1 )
+  Job 1 ( length = 10, tickets = 100 )
+
+
+,** Solutions **
+
+Random 844422 -> Winning ticket 62 (of 101) -> Run 1
+  Jobs:
+ (  job:0 timeleft:10 tix:1 )  (* job:1 timeleft:10 tix:100 ) 
+Random 757955 -> Winning ticket 51 (of 101) -> Run 1
+  Jobs:
+ (  job:0 timeleft:10 tix:1 )  (* job:1 timeleft:9 tix:100 ) 
+Random 420572 -> Winning ticket 8 (of 101) -> Run 1
+  Jobs:
+ (  job:0 timeleft:10 tix:1 )  (* job:1 timeleft:8 tix:100 ) 
+Random 258917 -> Winning ticket 54 (of 101) -> Run 1
+  Jobs:
+ (  job:0 timeleft:10 tix:1 )  (* job:1 timeleft:7 tix:100 ) 
+Random 511275 -> Winning ticket 13 (of 101) -> Run 1
+  Jobs:
+ (  job:0 timeleft:10 tix:1 )  (* job:1 timeleft:6 tix:100 ) 
+Random 404934 -> Winning ticket 25 (of 101) -> Run 1
+  Jobs:
+ (  job:0 timeleft:10 tix:1 )  (* job:1 timeleft:5 tix:100 ) 
+Random 783799 -> Winning ticket 39 (of 101) -> Run 1
+  Jobs:
+ (  job:0 timeleft:10 tix:1 )  (* job:1 timeleft:4 tix:100 ) 
+Random 303313 -> Winning ticket 10 (of 101) -> Run 1
+  Jobs:
+ (  job:0 timeleft:10 tix:1 )  (* job:1 timeleft:3 tix:100 ) 
+Random 476597 -> Winning ticket 79 (of 101) -> Run 1
+  Jobs:
+ (  job:0 timeleft:10 tix:1 )  (* job:1 timeleft:2 tix:100 ) 
+Random 583382 -> Winning ticket 6 (of 101) -> Run 1
+  Jobs:
+ (  job:0 timeleft:10 tix:1 )  (* job:1 timeleft:1 tix:100 ) 
+--> JOB 1 DONE at time 10
+Random 908113 -> Winning ticket 0 (of 1) -> Run 0
+  Jobs:
+ (* job:0 timeleft:10 tix:1 )  (  job:1 timeleft:0 tix:--- ) 
+Random 504687 -> Winning ticket 0 (of 1) -> Run 0
+  Jobs:
+ (* job:0 timeleft:9 tix:1 )  (  job:1 timeleft:0 tix:--- ) 
+Random 281838 -> Winning ticket 0 (of 1) -> Run 0
+  Jobs:
+ (* job:0 timeleft:8 tix:1 )  (  job:1 timeleft:0 tix:--- ) 
+Random 755804 -> Winning ticket 0 (of 1) -> Run 0
+  Jobs:
+ (* job:0 timeleft:7 tix:1 )  (  job:1 timeleft:0 tix:--- ) 
+Random 618369 -> Winning ticket 0 (of 1) -> Run 0
+  Jobs:
+ (* job:0 timeleft:6 tix:1 )  (  job:1 timeleft:0 tix:--- ) 
+Random 250506 -> Winning ticket 0 (of 1) -> Run 0
+  Jobs:
+ (* job:0 timeleft:5 tix:1 )  (  job:1 timeleft:0 tix:--- ) 
+Random 909747 -> Winning ticket 0 (of 1) -> Run 0
+  Jobs:
+ (* job:0 timeleft:4 tix:1 )  (  job:1 timeleft:0 tix:--- ) 
+Random 982786 -> Winning ticket 0 (of 1) -> Run 0
+  Jobs:
+ (* job:0 timeleft:3 tix:1 )  (  job:1 timeleft:0 tix:--- ) 
+Random 810218 -> Winning ticket 0 (of 1) -> Run 0
+  Jobs:
+ (* job:0 timeleft:2 tix:1 )  (  job:1 timeleft:0 tix:--- ) 
+Random 902166 -> Winning ticket 0 (of 1) -> Run 0
+  Jobs:
+ (* job:0 timeleft:1 tix:1 )  (  job:1 timeleft:0 tix:--- ) 
+--> JOB 0 DONE at time 20
+
+#+end_example
+
+* [[http://pages.cs.wisc.edu/~remzi/OSTEP/cpu-sched-multi.pdf][Scheduling Em Multiprocessadores]]
+
+Com a chegada dos sistemas com multiprocessadores, o problema de scheduling fica mais complicado. 
+
+** Background: Arquitetura De Multiprocessadores
+
+Em cada CPU, existem hierarquias de caches de hardware, responsáveis por armazenar cópias de dados populares 
+coletados da memória principal, para serem reutilizados futuramente. Caches são baseados no conceito de localidade.
+Existindo dois tipos: localidade temporal e localidade espacial.
+A localidade temporal assume que quando uma parte de informação é acessada, é provavel que seja acessada de novo
+em um futuro próximo (variáveis e instruções em um loop, por exemplo).
+A localidade espacial assume que quando uma parte de informação é acessada no endereço x, é provavel que acesse, também,
+os endereços próximos de x (percorrendo um array, por exemplo).
+
+Quando múltiplos processadores são envolvidos, aparece um problema chamado de coerência de cache. Como cada processador
+possui seu próprio sistema de cache, é possível que uma informação que tenha sido atualizada por algum processo e 
+ainda não tenha sido escrita na memória principal apresente incongruência se outro processador tentar acessá-la.
+Para solucionar, o hardware deve monitorar os acessos a memória. Uma forma é através do barramento,
+pelo qual cada cache presta atenção às atualizações na memória, modificando o valor lido ou escrito caso tenha
+uma versão  mais atualizada ou se atualiza. 
+
+** Não Se Esqueça Da Sincronização
+
+Além disso, quando processos são feitos para executar em múltiplos processadores, deve-se garantir que 
+o acesso a estruturas entre as CPU não seja compartilhado, evitando que dois processadores escrevam ou leiam valores 
+incorretos.
+Como solução, algumas rotinas devem ser corrigidas via *locking*.
+
+
+** Um último problema: Afinidade De Cache
+
+É vantajoso rodar um processo na mesma CPU, visto que durante a execução, várias informações de estado ficam
+salvas no cache daquela CPU.
+
+** Single-Queue Scheduling
+
+Fila única, na qual todos os processos se encontram. Cada processador utiliza algum algoritmo para decidir o proximo
+processo. Entretanto possui alguns problemas. O primeiro é a falta de escalabilidade, já que o usuário deve ter
+programado vários locks nos códigos, restringindo o processo disponível para cada processador.
+Outro problema é o de afinidade de cache. Já que cada processador apenas escolhe o próximo processo da fila,
+é possível que a tarefa em questão fique indo de CPU a CPU, contrariando a afinidade de cache. 
+Assim, a maioria dos schedulers SQMS incluem alguma forma de mecanismo de afinidade, garantindo que um processo
+continue a executar na mesma CPU, se possível. 
+Assim, SQMS possui suas vantagens e desvantagens: simples de implementar, a partir de um single-CPU scheduler, 
+mas não escalona bem (por causa das overheads de sincronização), e não preserva afinidade de cache.
+
+** Multi-Queue Scheduling
+
+E MQMS, existem várias filas. Cada fila seguirá sua disciplina de scheduling, organizando os processos de forma 
+independente. Assim, evita problemas de compartilhamento de informações e sincronização encontrados no SQMS.
+Alguns problemas surgem: O primeiro referente ao desbalanceamento da carga, visto que os processos em uma CPU
+podem encerrar antes dos processos de uma outra, desbalanceando a carga e a fatia de tempo das tarefas.
+Assim, é necessário migrar processos de uma CPU para outra. Uma estratégia comum é a de *work stealing*. 
+Nela, uma fila que está com poucos processos irá verificar as outras filas. Caso tenha menos carga que ela, o
+processo é migrado. Claro que pode existir um overhead se essa verificação for constante, ou um desbalanceamento 
+de carga, se demorada demais.
+
+** Linux Multiprocessor Schedulers
+
+Não há senso comum em relação a um scheduler multiprocessador. Com o tempo, três alternativas surgiram: o O(1), 
+o CFS e o BFS. O(1) e CFS usam múltiplas filas, enquanto o BFS utiliza apenas uma. O O(1) é um
+scheduler baseado em prioridade (semelhante ao MLFQ), enquanto o CFS adota uma abordagem de compartilhamento
+proporcional determinístico. 
+
+** Homework
+
+*** Questão 1
+
+#+BEGIN_SRC shell :results value verbatim
+  ./homework/cpu-sched-multi/multi.py -n 1 -L a:30:200 -c -t
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+ARG seed 0
+ARG job_num 3
+ARG max_run 100
+ARG max_wset 200
+ARG job_list a:30:200
+ARG affinity 
+ARG per_cpu_queues False
+ARG num_cpus 1
+ARG quantum 10
+ARG peek_interval 30
+ARG warmup_time 10
+ARG cache_size 100
+ARG random_order False
+ARG trace True
+ARG trace_time False
+ARG trace_cache False
+ARG trace_sched False
+ARG compute True
+
+Job name:a run_time:30 working_set_size:200
+
+Scheduler central queue: ['a']
+
+   0   a      
+   1   a      
+   2   a      
+   3   a      
+   4   a      
+   5   a      
+   6   a      
+   7   a      
+   8   a      
+   9   a      
+----------
+  10   a      
+  11   a      
+  12   a      
+  13   a      
+  14   a      
+  15   a      
+  16   a      
+  17   a      
+  18   a      
+  19   a      
+----------
+  20   a      
+  21   a      
+  22   a      
+  23   a      
+  24   a      
+  25   a      
+  26   a      
+  27   a      
+  28   a      
+  29   a      
+
+Finished time 30
+
+Per-CPU stats
+  CPU 0  utilization 100.00 [ warm 0.00 ]
+
+#+end_example
+
+*** Questão 2
+
+#+BEGIN_SRC shell :results value verbatim
+  ./homework/cpu-sched-multi/multi.py -n 1 -L a:30:200 -M 300 -c -t
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+ARG seed 0
+ARG job_num 3
+ARG max_run 100
+ARG max_wset 200
+ARG job_list a:30:200
+ARG affinity 
+ARG per_cpu_queues False
+ARG num_cpus 1
+ARG quantum 10
+ARG peek_interval 30
+ARG warmup_time 10
+ARG cache_size 300
+ARG random_order False
+ARG trace True
+ARG trace_time False
+ARG trace_cache False
+ARG trace_sched False
+ARG compute True
+
+Job name:a run_time:30 working_set_size:200
+
+Scheduler central queue: ['a']
+
+   0   a      
+   1   a      
+   2   a      
+   3   a      
+   4   a      
+   5   a      
+   6   a      
+   7   a      
+   8   a      
+   9   a      
+----------
+  10   a      
+  11   a      
+  12   a      
+  13   a      
+  14   a      
+  15   a      
+  16   a      
+  17   a      
+  18   a      
+  19   a      
+
+Finished time 20
+
+Per-CPU stats
+  CPU 0  utilization 100.00 [ warm 50.00 ]
+
+#+end_example
+
+*** Questão 3
+
+#+BEGIN_SRC shell :results value verbatim
+  ./homework/cpu-sched-multi/multi.py -n 1 -L a:30:200 -M 300 -c -t -T
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+ARG seed 0
+ARG job_num 3
+ARG max_run 100
+ARG max_wset 200
+ARG job_list a:30:200
+ARG affinity 
+ARG per_cpu_queues False
+ARG num_cpus 1
+ARG quantum 10
+ARG peek_interval 30
+ARG warmup_time 10
+ARG cache_size 300
+ARG random_order False
+ARG trace True
+ARG trace_time True
+ARG trace_cache False
+ARG trace_sched False
+ARG compute True
+
+Job name:a run_time:30 working_set_size:200
+
+Scheduler central queue: ['a']
+
+   0   a [ 29]      
+   1   a [ 28]      
+   2   a [ 27]      
+   3   a [ 26]      
+   4   a [ 25]      
+   5   a [ 24]      
+   6   a [ 23]      
+   7   a [ 22]      
+   8   a [ 21]      
+   9   a [ 20]      
+----------------
+  10   a [ 18]      
+  11   a [ 16]      
+  12   a [ 14]      
+  13   a [ 12]      
+  14   a [ 10]      
+  15   a [  8]      
+  16   a [  6]      
+  17   a [  4]      
+  18   a [  2]      
+  19   a [  0]      
+
+Finished time 20
+
+Per-CPU stats
+  CPU 0  utilization 100.00 [ warm 50.00 ]
+
+#+end_example
+
+*** Questão 4
+
+#+BEGIN_SRC shell :results value verbatim
+  ./homework/cpu-sched-multi/multi.py -n 1 -L a:30:200 -M 300 -c -t -T -C
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+ARG seed 0
+ARG job_num 3
+ARG max_run 100
+ARG max_wset 200
+ARG job_list a:30:200
+ARG affinity 
+ARG per_cpu_queues False
+ARG num_cpus 1
+ARG quantum 10
+ARG peek_interval 30
+ARG warmup_time 10
+ARG cache_size 300
+ARG random_order False
+ARG trace True
+ARG trace_time True
+ARG trace_cache True
+ARG trace_sched False
+ARG compute True
+
+Job name:a run_time:30 working_set_size:200
+
+Scheduler central queue: ['a']
+
+   0   a [ 29] cache[ ]     
+   1   a [ 28] cache[ ]     
+   2   a [ 27] cache[ ]     
+   3   a [ 26] cache[ ]     
+   4   a [ 25] cache[ ]     
+   5   a [ 24] cache[ ]     
+   6   a [ 23] cache[ ]     
+   7   a [ 22] cache[ ]     
+   8   a [ 21] cache[ ]     
+   9   a [ 20] cache[w]     
+-------------------------
+  10   a [ 18] cache[w]     
+  11   a [ 16] cache[w]     
+  12   a [ 14] cache[w]     
+  13   a [ 12] cache[w]     
+  14   a [ 10] cache[w]     
+  15   a [  8] cache[w]     
+  16   a [  6] cache[w]     
+  17   a [  4] cache[w]     
+  18   a [  2] cache[w]     
+  19   a [  0] cache[w]     
+
+Finished time 20
+
+Per-CPU stats
+  CPU 0  utilization 100.00 [ warm 50.00 ]
+
+#+end_example
+
+*** Questão 5
+
+#+BEGIN_SRC shell :results value verbatim
+  ./homework/cpu-sched-multi/multi.py -n 2 -L a:100:100,b:100:50,c:100:50 -c
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+ARG seed 0
+ARG job_num 3
+ARG max_run 100
+ARG max_wset 200
+ARG job_list a:100:100,b:100:50,c:100:50
+ARG affinity 
+ARG per_cpu_queues False
+ARG num_cpus 2
+ARG quantum 10
+ARG peek_interval 30
+ARG warmup_time 10
+ARG cache_size 100
+ARG random_order False
+ARG trace False
+ARG trace_time False
+ARG trace_cache False
+ARG trace_sched False
+ARG compute True
+
+Job name:a run_time:100 working_set_size:100
+Job name:b run_time:100 working_set_size:50
+Job name:c run_time:100 working_set_size:50
+
+Scheduler central queue: ['a', 'b', 'c']
+
+
+Finished time 150
+
+Per-CPU stats
+  CPU 0  utilization 100.00 [ warm 0.00 ]
+  CPU 1  utilization 100.00 [ warm 0.00 ]
+
+#+end_example
